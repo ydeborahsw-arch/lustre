@@ -1622,6 +1622,15 @@ public class NativeInputPlugin: CAPPlugin, CAPBridgedPlugin, UITextViewDelegate 
         }
     }
 
+    /// 预览专用:往输入框里放字/清空。不走 pushChange(不发 textChanged,免得把草稿同步出去)
+    func previewComposer(text: String) {
+        guard LustreConfig.isPreview, let t = tv else { return }
+        t.text = text
+        phLabel?.isHidden = !text.isEmpty
+        syncSendIcon()
+        updateCardHeight()
+    }
+
     func tvConstraintsInCard(_ t: UITextView, _ cardV: UIView) -> [NSLayoutConstraint] {
         if avatarOn, let pill = avPillG {
             // 头像样式:字在药丸里,字左边离药丸 15、右边整段留 43(3 + 发送键 34 + 6),发送键出没字不挪;

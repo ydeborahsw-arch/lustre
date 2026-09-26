@@ -4663,6 +4663,17 @@ public class ChatListPlugin: CAPPlugin, CAPBridgedPlugin, UITableViewDataSource,
         armPushIntake()
 
         if LustreConfig.isPreview {
+            // 0926 拍头像模式新输入栏:先有字(发送键该露出来,p01),再假装在录(红圆+红点计时+×,p02),然后收回空的
+            DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
+                NativeInputPlugin.live?.previewComposer(text: "Preview")
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 20) {
+                NativeInputPlugin.live?.previewComposer(text: "")
+                NativeInputPlugin.live?.enterRecUI()
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 28) {
+                NativeInputPlugin.live?.exitRecUI()
+            }
             DispatchQueue.main.asyncAfter(deadline: .now() + 8) { [weak self] in
                 guard let s = self else { return }
                 var target: Int64? = nil
