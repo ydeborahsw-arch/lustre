@@ -1188,6 +1188,8 @@ public class NativeInputPlugin: CAPPlugin, CAPBridgedPlugin, UITextViewDelegate 
                 t.owner = self
                 t.delegate = self
                 t.backgroundColor = .clear
+                // 主题的 color 没到之前(全新安装还没存过主题)先用深色卡的字色,和图标、键盘的默认深色一致
+                t.textColor = UIColor(red: 0xE3/255, green: 0xE2/255, blue: 0xE7/255, alpha: 1)
                 t.tintColor = UIColor(red: 0.714, green: 0.839, blue: 0.910, alpha: 1)
                 t.keyboardAppearance = .dark
                 t.textContainer.lineFragmentPadding = 0

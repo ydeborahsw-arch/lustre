@@ -2202,6 +2202,8 @@ public class HomePlugin: CAPPlugin, CAPBridgedPlugin, UIGestureRecognizerDelegat
     }
 
     private func attach(host: UIView, theme: HomeTheme, flame: String, enter: Bool, deferLoad: Bool) {
+        // 预览路线 composer 只拍输入栏:首页不上来(它晚到会盖住聊天页)
+        if LustreConfig.isPreview && LustreConfig.previewFocus == "composer" { return }
         var ghost: UIView? = nil
         for sub in host.subviews where sub is HomeView {
             if ghost == nil, !sub.isHidden, sub.alpha > 0.01,
