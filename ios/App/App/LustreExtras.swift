@@ -678,6 +678,7 @@ final class BackgroundSync {
                   let msgs = obj["messages"] as? [[String: Any]] else { return }
             var maxId = seen
             var newest: String?
+            var newestSid = ""
             for m in msgs {
                 let id = (m["id"] as? Int) ?? 0
                 if id > maxId { maxId = id }
@@ -685,7 +686,10 @@ final class BackgroundSync {
                 let kind = (m["kind"] as? String) ?? ""
                 if from != "human" && (kind == "reply" || kind == "user") {
                     let t = (m["text"] as? String) ?? ""
-                    if !t.isEmpty { newest = t }
+                    if !t.isEmpty {
+                        newest = t
+                        newestSid = ((m["meta"] as? [String: Any])?["api_session"] as? String) ?? ""
+                    }
                 }
             }
             guard maxId > seen else { return }
@@ -693,13 +697,15 @@ final class BackgroundSync {
             guard seen > 0, let text = newest else { return }
             let fresh = msgs.filter { (($0["from"] as? String) ?? "") != "human" && (($0["id"] as? Int) ?? 0) > seen }.count
             guard !ApnsToken.serverPushOwns else { return }
-            self.notify(text, badge: max(1, fresh))
+            self.notify(text, badge: max(1, fresh), session: newestSid)
         }.resume()
     }
 
-    func notify(_ text: String, badge: Int = 0) {
+    /// 0926 带上是哪一窗:标题按那一窗的备注,thread 跟服务器推送同一套("" 记 main),点开由 LXPushRoute 按 thread 切过去
+    func notify(_ text: String, badge: Int = 0, session: String = "") {
         let c = UNMutableNotificationContent()
-        c.title = LXNick.yan
+        c.title = LXNick.of(session: session)
+        c.threadIdentifier = session.isEmpty ? "main" : session
         c.body = String(text.prefix(120))
         c.sound = .default
         if badge > 0 { c.badge = NSNumber(value: badge) }
