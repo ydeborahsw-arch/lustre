@@ -786,6 +786,51 @@ enum ImeLine {
                 hooked.append(name + ".tintColor(替换)")
             }
         }
+        if let c = NSClassFromString("_UITextUnderlineView"),
+           let m = class_getInstanceMethod(c, #selector(UIView.layoutSubviews)) {
+            typealias Lay = @convention(c) (AnyObject, Selector) -> Void
+            let sel = #selector(UIView.layoutSubviews)
+            let orig = unsafeBitCast(method_getImplementation(m), to: Lay.self)
+            let block: @convention(block) (UIView) -> Void = { v in
+                orig(v, sel)
+                ImeLine.lower(v)
+            }
+            let imp = imp_implementationWithBlock(block)
+            if !class_addMethod(c, sel, imp, method_getTypeEncoding(m)) { method_setImplementation(m, imp) }
+            hooked.append("_UITextUnderlineView.layoutSubviews")
+        }
+    }
+
+    /// 0926 她:打拼音时系统那条下划线划过 g、q 的尾巴。出包时字体里的下划线位置已经往下挪了;
+    /// 万一系统不按字体放,这里再兜一次:线的上沿至少落在这一行最低处下面半个点,只往下挪不往上挪
+    static func lower(_ host: UIView) {
+        var p = host.superview
+        var box: LXTextView?
+        for _ in 0..<8 where box == nil {
+            box = p as? LXTextView
+            p = p?.superview
+        }
+        guard let t = box else { return }
+        let was = host.transform.ty
+        guard let r = t.markedTextRange else {
+            if was != 0 { host.transform = .identity }
+            return
+        }
+        let seg = host.subviews.first { !$0.isHidden && $0.bounds.width > 0 && $0.bounds.height <= 5 }
+            ?? (host.bounds.height <= 5 ? host : nil)
+        guard let s = seg else { return }
+        let top = s.convert(s.bounds, to: t).minY - was
+        let need = t.caretRect(for: r.start).maxY + 0.5 - top
+        let cap = (t.font?.pointSize ?? 14) * 0.3
+        let dy: CGFloat = (need > 0.25 && need < cap) ? need : 0
+        if abs(dy - was) > 0.1 { host.transform = CGAffineTransform(translationX: 0, y: dy) }
+    }
+    static func lowerAll(_ root: UIView, _ depth: Int = 0) {
+        guard depth < 7 else { return }
+        for v in root.subviews {
+            if String(describing: type(of: v)).contains("TextUnderlineView") { lower(v) }
+            lowerAll(v, depth + 1)
+        }
     }
     private static func swap(_ cls: AnyClass, _ origName: String, _ newSel: Selector) {
         guard let orig = class_getInstanceMethod(cls, NSSelectorFromString(origName)),
@@ -2972,6 +3017,7 @@ class LXTextView: UITextView {
     }
     override func layoutSubviews() {
         super.layoutSubviews()
+        if markedTextRange != nil { ImeLine.lowerAll(self) }
         guard (text ?? "").isEmpty else { return }
         if contentOffset != .zero { contentOffset = .zero }
         owner?.layoutPlaceholder()

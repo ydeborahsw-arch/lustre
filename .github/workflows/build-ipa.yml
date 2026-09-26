@@ -60,6 +60,18 @@ jobs:
         run: |
           echo "::add-mask::$LX_FONT_URL"
           curl -fsSL "$LX_FONT_URL" -o ios/App/App/AnthropicSans.ttf
+      - name: Lower the font's underline below the descenders
+        run: |
+          python3 -m venv /tmp/ft && /tmp/ft/bin/pip install -q fonttools
+          /tmp/ft/bin/python - <<'EOF'
+          from fontTools.ttLib import TTFont
+          p = 'ios/App/App/AnthropicSans.ttf'
+          f = TTFont(p)
+          print('underline before', f['post'].underlinePosition, f['post'].underlineThickness)
+          f['post'].underlinePosition = -700
+          f.save(p)
+          print('underline after', TTFont(p)['post'].underlinePosition)
+          EOF
       - name: Install deps & sync
         run: |
           npm ci || npm install
