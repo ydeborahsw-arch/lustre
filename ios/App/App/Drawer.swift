@@ -1123,6 +1123,10 @@ enum LXDrawer {
         LXStage.settle(host)
     }
     static var isShowing: Bool { !(view?.isHidden ?? true) }
+    /// 0926:点通知进对话——和点这里的一行是同一个动作(切窗、收抽屉、离开 Home)
+    static func pick(_ sid: String) {
+        if let go = onAct { go("session", sid) } else { ChatListPlugin.live?.switchTo(sid) }
+    }
     static func update(_ d: [String: Any]) {
         LXDrawerSpec.save(d)
         spec = LXDrawerSpec.from(d)

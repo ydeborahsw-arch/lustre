@@ -134,11 +134,18 @@ extension AppDelegate: UNUserNotificationCenterDelegate {
     func userNotificationCenter(_ center: UNUserNotificationCenter,
                                 didReceive response: UNNotificationResponse,
                                 withCompletionHandler completionHandler: @escaping () -> Void) {
-        let info = response.notification.request.content.userInfo
-        if let lx = info["lx"] as? [String: Any] {
-            AppDelegate.pendingPush = lx
-            NotificationCenter.default.post(name: Notification.Name("lx.push.message"), object: nil, userInfo: lx)
+        let content = response.notification.request.content
+        let lx = content.userInfo["lx"] as? [String: Any]
+        let tapped = response.actionIdentifier == UNNotificationDefaultActionIdentifier
+        let run: () -> Void = {
+            // 0926:点通知先切到那条消息的窗,再喂背来的消息——消息落进切过去的那一窗
+            if tapped { LXPushRoute.open(lx, thread: content.threadIdentifier) }
+            if let lx {
+                AppDelegate.pendingPush = lx
+                NotificationCenter.default.post(name: Notification.Name("lx.push.message"), object: nil, userInfo: lx)
+            }
         }
+        if Thread.isMainThread { run() } else { DispatchQueue.main.async(execute: run) }
         completionHandler()
     }
 
@@ -151,5 +158,49 @@ extension AppDelegate: UNUserNotificationCenterDelegate {
         } else {
             completionHandler([.alert, .sound])
         }
+    }
+}
+
+/// 0926 她的单:点消息通知(横幅/通知中心)直接进那条消息所在的对话,和点抽屉那一行走同一条路。
+/// 认窗看 lx.meta.api_session:他的窗 "yan-main",昭的窗 ""(App 里叫 "__legacy__");没背 lx 才看 aps.thread-id("main"=昭)。
+enum LXPushRoute {
+    private static var pending: String?
+
+    static func target(_ lx: [String: Any]?, thread: String) -> String? {
+        let sid: String
+        if let meta = lx?["meta"] as? [String: Any] {
+            sid = (meta["api_session"] as? String) ?? ""
+        } else if !thread.isEmpty {
+            sid = thread == "main" ? "" : thread
+        } else {
+            return nil
+        }
+        return sid.isEmpty ? "__legacy__" : sid
+    }
+
+    static func open(_ lx: [String: Any]?, thread: String) {
+        guard let sid = target(lx, thread: thread) else { return }
+        // 冷启动聊天页还没搭:记成上次选中,开机直接落在这一窗(不先开错窗再切),背来的消息也进这一窗
+        if ChatListPlugin.live?.container == nil {
+            UserDefaults.standard.set(sid, forKey: "lx.sessionPick")
+        }
+        pending = sid
+        deliver()
+    }
+
+    private static func deliver(_ attempt: Int = 0) {
+        guard let sid = pending else { return }
+        guard let chat = ChatListPlugin.live, let cont = chat.container else {
+            if attempt >= 20 { pending = nil; return }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { deliver(attempt + 1) }
+            return
+        }
+        pending = nil
+        let cur = chat.data.session.isEmpty ? "__legacy__" : chat.data.session
+        let host = chat.bridge?.viewController?.view
+        let homeUp = host?.subviews.contains(where: { $0 is HomeView && !$0.isHidden }) ?? false
+        // 已在这一窗、聊天页也露着:一动不动(不重排、不跳底);被抽屉或 Home 盖着才走一遍切换把它亮出来
+        if sid == cur, cont.transform.tx <= 0, !homeUp { return }
+        LXDrawer.pick(sid)
     }
 }
