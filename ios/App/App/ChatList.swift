@@ -4388,6 +4388,8 @@ public class ChatListPlugin: CAPPlugin, CAPBridgedPlugin, UITableViewDataSource,
     let data = LXChatData()
     var theme = LXChatTheme() {
         didSet {
+            // 输入栏胶囊里的星芒跟页脚星同色,换月相时跟着换
+            if oldValue.fnStar != theme.fnStar { NativeInputPlugin.live?.avModelBtn?.tintColor = theme.fnStar }
             // 0926 头像模式换输入栏样式。switchMoon 会先清零再恢复(假翻转),攒到下一拍只认最后的值;只动输入栏,聊天页不重建
             if oldValue.avatars != theme.avatars, !composerStyleQueued {
                 composerStyleQueued = true

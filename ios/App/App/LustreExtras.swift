@@ -1502,9 +1502,10 @@ public class NativeInputPlugin: CAPPlugin, CAPBridgedPlugin, UITextViewDelegate 
         let voiceB = mkBtn(NativeInputPlugin.voiceIcon())
         let starB = mkBtn(NativeInputPlugin.starIcon())
         let plusB = mkBtn(NativeInputPlugin.ringPlusIcon())
-        // 胶囊左右各一半当点击区;图标中心离两头 21.5(半宽 41,往外挪 1)
-        starB.contentEdgeInsets = UIEdgeInsets(top: 0, left: 2, bottom: 0, right: 0)
-        plusB.contentEdgeInsets = UIEdgeInsets(top: 0, left: 0, bottom: 0, right: 2)
+        // 胶囊左右各一半当点击区;图标中心离两头 21.5(半宽 41,往外挪 1)。0926 她:加号在左、星芒在右,星芒用星芒色
+        plusB.contentEdgeInsets = UIEdgeInsets(top: 0, left: 2, bottom: 0, right: 0)
+        starB.contentEdgeInsets = UIEdgeInsets(top: 0, left: 0, bottom: 0, right: 2)
+        starB.tintColor = NativeInputPlugin.starTint
         voiceB.addAction(UIAction { [weak self] _ in
             guard let s = self else { return }
             if s.recorder != nil { s.recStop(send: true) } else { s.showMicMiniMenu() }
@@ -1545,11 +1546,11 @@ public class NativeInputPlugin: CAPPlugin, CAPBridgedPlugin, UITextViewDelegate 
             voiceB.trailingAnchor.constraint(equalTo: voiceG.trailingAnchor),
             voiceB.topAnchor.constraint(equalTo: voiceG.topAnchor),
             voiceB.bottomAnchor.constraint(equalTo: voiceG.bottomAnchor),
-            starB.leadingAnchor.constraint(equalTo: capG.leadingAnchor),
+            starB.trailingAnchor.constraint(equalTo: capG.trailingAnchor),
             starB.topAnchor.constraint(equalTo: capG.topAnchor),
             starB.bottomAnchor.constraint(equalTo: capG.bottomAnchor),
             starB.widthAnchor.constraint(equalTo: capG.widthAnchor, multiplier: 0.5),
-            plusB.trailingAnchor.constraint(equalTo: capG.trailingAnchor),
+            plusB.leadingAnchor.constraint(equalTo: capG.leadingAnchor),
             plusB.topAnchor.constraint(equalTo: capG.topAnchor),
             plusB.bottomAnchor.constraint(equalTo: capG.bottomAnchor),
             plusB.widthAnchor.constraint(equalTo: capG.widthAnchor, multiplier: 0.5),
@@ -1596,6 +1597,7 @@ public class NativeInputPlugin: CAPPlugin, CAPBridgedPlugin, UITextViewDelegate 
         modelBtn?.isHidden = on || !modelHasName
         let avViews: [UIView?] = [avVoiceG, avPillG, avCapG, avVoiceBtn, avModelBtn, avPlusBtn]
         for v in avViews { v?.isHidden = !on }
+        avModelBtn?.tintColor = NativeInputPlugin.starTint
         cardLeadC?.constant = on ? 4.5 : cardMarginX
         cardTrailC?.constant = on ? -4.5 : -cardMarginX
         NSLayoutConstraint.deactivate(on ? normalCons : avatarCons)
@@ -1838,7 +1840,7 @@ public class NativeInputPlugin: CAPPlugin, CAPBridgedPlugin, UITextViewDelegate 
                 if #available(iOS 26.0, *) { g?.overrideUserInterfaceStyle = dark ? .dark : .light }
                 else { g?.effect = UIBlurEffect(style: dark ? .systemThickMaterialDark : .systemThinMaterialLight) }
             }
-            avModelBtn?.tintColor = fg; avPlusBtn?.tintColor = fg; avRecL?.textColor = fg
+            avModelBtn?.tintColor = NativeInputPlugin.starTint; avPlusBtn?.tintColor = fg; avRecL?.textColor = fg
             if !(avatarOn && recorder != nil) { avVoiceBtn?.tintColor = fg }
             let want: UIKeyboardAppearance = dark ? .dark : .light
             if let t = tv, t.keyboardAppearance != want {
@@ -1948,6 +1950,9 @@ public class NativeInputPlugin: CAPPlugin, CAPBridgedPlugin, UITextViewDelegate 
             p.stroke()
         }.withRenderingMode(.alwaysTemplate)
     }
+
+    /// 星芒色:跟聊天页页脚那颗星同一个色(日/半月橙,月夜浅蓝)
+    static var starTint: UIColor { ChatListPlugin.live?.theme.fnStar ?? LXSheetInk.star }
 
     // 0926 头像样式三颗图标,量她的参考图 1:1:外圈 d26.7、线宽 1.67,模板图由主题图标墨着色
     private static let avIconD: CGFloat = 26.7
