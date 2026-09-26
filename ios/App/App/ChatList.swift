@@ -3755,18 +3755,7 @@ final class LXFileCard: UIControl {
         layer.cornerRadius = 16
         layer.cornerCurve = .continuous
         clipsToBounds = true
-        if #available(iOS 26.0, *) {
-            backgroundColor = .clear
-            layer.borderWidth = 0
-            // 0926 她:头像模式里这张卡"太灰了"。头像模式跟气泡用同一种玻璃(.clear、不压深浅);
-            // 原来按主题底色压成深色 regular 玻璃,浅壁纸上就是一块灰
-            let g = UIVisualEffectView(effect: theme.avatars ? UIGlassEffect(style: .clear) : UIGlassEffect())
-            if !theme.avatars {
-                var w: CGFloat = 0
-                theme.bg.getWhite(&w, alpha: nil)
-                g.overrideUserInterfaceStyle = w < 0.5 ? .dark : .light
-            }
-            g.cornerConfiguration = .uniformCorners(radius: .fixed(16))
+        func pinBehind(_ g: UIView) {
             g.translatesAutoresizingMaskIntoConstraints = false
             g.isUserInteractionEnabled = false
             addSubview(g)
@@ -3774,6 +3763,26 @@ final class LXFileCard: UIControl {
                 g.topAnchor.constraint(equalTo: topAnchor), g.bottomAnchor.constraint(equalTo: bottomAnchor),
                 g.leadingAnchor.constraint(equalTo: leadingAnchor), g.trailingAnchor.constraint(equalTo: trailingAnchor),
             ])
+        }
+        if theme.avatars {
+            // 0926 她:头像模式里这张卡"太灰了"→跟气泡用同一种薄玻璃;薄玻璃画的是圆弧角,卡片裁边也用圆弧
+            backgroundColor = .clear
+            layer.borderWidth = 0
+            layer.cornerCurve = .circular
+            let g = LXSoftGlassView()
+            g.maxRadius = 16
+            g.light = LXSoftGlassView.onLight(textColor)
+            pinBehind(g)
+        } else if #available(iOS 26.0, *) {
+            backgroundColor = .clear
+            layer.borderWidth = 0
+            // 普通模式:regular 玻璃,按主题底色压深浅
+            let g = UIVisualEffectView(effect: UIGlassEffect())
+            var w: CGFloat = 0
+            theme.bg.getWhite(&w, alpha: nil)
+            g.overrideUserInterfaceStyle = w < 0.5 ? .dark : .light
+            g.cornerConfiguration = .uniformCorners(radius: .fixed(16))
+            pinBehind(g)
         } else {
             backgroundColor = theme.cardBg
             layer.borderWidth = 1
