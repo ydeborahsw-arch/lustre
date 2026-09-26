@@ -38,17 +38,6 @@ jobs:
           echo "::add-mask::$LX_FONT_URL"
           echo "::add-mask::$LX_SHOT_URL"
           curl -fsSL "$LX_FONT_URL" -o ios/App/App/AnthropicSans.ttf
-      - name: Lower the font's underline below the descenders (trial)
-        run: |
-          python3 -m venv /tmp/ft && /tmp/ft/bin/pip install -q fonttools
-          /tmp/ft/bin/python - <<'EOF'
-          from fontTools.ttLib import TTFont
-          p = 'ios/App/App/AnthropicSans.ttf'
-          f = TTFont(p)
-          print('underline before', f['post'].underlinePosition, f['post'].underlineThickness)
-          f['post'].underlinePosition = -600
-          f.save(p)
-          EOF
       - name: Mark build as preview
         run: |
           python3 - <<'EOF'
@@ -87,7 +76,7 @@ jobs:
             # Input bar only: the app parks it empty / with text / recording for about 20 s each; a shot every 5 s covers all three.
             # The app hides the chat list in this route, so these shots hold nothing but the bar.
             sleep 5
-            for t in $(seq 10 5 160); do sleep 5; shot c$t; done
+            for t in $(seq 10 5 115); do sleep 5; shot c$t; done
           elif [ "$LX_PREVIEW_FOCUS" = "bubbles" ]; then
             # A full-screen page of sample bubbles covers everything; the chat list is hidden underneath.
             sleep 5

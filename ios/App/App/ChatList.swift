@@ -5787,15 +5787,6 @@ public class ChatListPlugin: CAPPlugin, CAPBridgedPlugin, UITableViewDataSource,
         DispatchQueue.main.asyncAfter(deadline: .now() + 105) {
             NativeInputPlugin.live?.previewComposer(text: "Preview\nSecond line\nThird line")
         }
-        // 0926 拼音下划线试验:115 秒回空栏、放一段带尾巴字母的拼音(g q y p j),拍到 c135
-        DispatchQueue.main.asyncAfter(deadline: .now() + 115) {
-            NativeInputPlugin.live?.previewComposer(text: "")
-            NativeInputPlugin.live?.previewMarked("hao qi gy pj")
-        }
-        // 0926 她要占位符视觉上绝对对称:三种居中法各停 10 秒(127 小写居中 / 137 两者平均 / 147 大写居中),拍到 c160
-        for (i, at) in [127.0, 137.0, 147.0].enumerated() {
-            DispatchQueue.main.asyncAfter(deadline: .now() + at) { NativeInputPlugin.live?.previewPhPick(i) }
-        }
     }
 
     private static func previewLightWall(_ size: CGSize) -> UIImage {
