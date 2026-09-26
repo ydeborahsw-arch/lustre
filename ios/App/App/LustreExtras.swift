@@ -69,7 +69,8 @@ enum LXSheetInk {
     static var chip: UIColor { m == "day" ? UIColor(white: 0, alpha: 0.06) : UIColor(white: 1, alpha: 0.08) }
     static var track: UIColor { m == "day" ? UIColor(white: 0, alpha: 0.08) : UIColor(white: 1, alpha: 0.13) }
     static var tile: UIColor { m == "day" ? hex(0xFFFFFF, 0.9) : m == "half" ? hex(0x262624) : UIColor(red: 0.118, green: 0.118, blue: 0.125, alpha: 1) }
-    static var star: UIColor { m == "moon" ? hex(0xB6D6E8) : hex(0xD97757) }
+    // 0926 她:白天和月夜同一支浅蓝,只有半月是橙
+    static var star: UIColor { m == "half" ? hex(0xD97757) : hex(0xB6D6E8) }
     static var tint: UIColor { m == "day" ? hex(0xF4F8FB, 0.72) : m == "half" ? hex(0x191917, 0.62) : UIColor(red: 0.043, green: 0.043, blue: 0.047, alpha: 0.62) }
 }
 
@@ -1514,7 +1515,7 @@ public class NativeInputPlugin: CAPPlugin, CAPBridgedPlugin, UITextViewDelegate 
         plusB.addAction(UIAction { [weak self] _ in self?.showPlusSheet() }, for: .touchUpInside)
         let dot = UIView()
         dot.translatesAutoresizingMaskIntoConstraints = false
-        dot.backgroundColor = .systemRed
+        dot.backgroundColor = NativeInputPlugin.starTint
         dot.layer.cornerRadius = 4
         dot.isHidden = true
         let recL = UILabel()
@@ -1835,7 +1836,7 @@ public class NativeInputPlugin: CAPPlugin, CAPBridgedPlugin, UITextViewDelegate 
             for b in [plusBtn, recCancelBtn] { b?.backgroundColor = chip; b?.tintColor = fg }
             if let m = micBtn { m.backgroundColor = chip; if recorder == nil { m.tintColor = fg } }
             modelBtn?.backgroundColor = chip
-            // 头像样式:玻璃跟深浅走(同卡片),三颗图标和录音计时用同一支图标墨;录音中的语音圆保持红
+            // 头像样式:玻璃跟深浅走(同卡片),三颗图标和录音计时用同一支图标墨;录音中的语音圆保持星芒色
             for g in [avVoiceG, avPillG, avCapG] {
                 if #available(iOS 26.0, *) { g?.overrideUserInterfaceStyle = dark ? .dark : .light }
                 else { g?.effect = UIBlurEffect(style: dark ? .systemThickMaterialDark : .systemThinMaterialLight) }
@@ -1951,8 +1952,15 @@ public class NativeInputPlugin: CAPPlugin, CAPBridgedPlugin, UITextViewDelegate 
         }.withRenderingMode(.alwaysTemplate)
     }
 
-    /// 星芒色:跟聊天页页脚那颗星同一个色(日/半月橙,月夜浅蓝)
+    /// 星芒色:跟聊天页页脚那颗星同一个色(白天和月夜浅蓝,半月橙)
     static var starTint: UIColor { ChatListPlugin.live?.theme.fnStar ?? LXSheetInk.star }
+    /// 换月相时星芒色跟着换:胶囊里的星芒,录音中的语音圆和点
+    func syncStarTint() {
+        let c = NativeInputPlugin.starTint
+        avModelBtn?.tintColor = c
+        avRecDot?.backgroundColor = c
+        if avatarOn && recorder != nil { avVoiceBtn?.tintColor = c }
+    }
 
     // 0926 头像样式三颗图标,量她的参考图 1:1:外圈 d26.7、线宽 1.67,模板图由主题图标墨着色
     private static let avIconD: CGFloat = 26.7
@@ -2791,7 +2799,7 @@ public class NativeInputPlugin: CAPPlugin, CAPBridgedPlugin, UITextViewDelegate 
     }
 
     /// 录音时的样子。普通样式:麦克风变红变宽 + 左边出 ×(照旧,只在录音中切样式时走这里);
-    /// 头像样式:语音圆变红,药丸左边红点 + 计时,× 占发送键的位;字先收起来,键盘也收(免得往看不见的框里打字)
+    /// 头像样式:语音圆和药丸左边的点用星芒色(0926 她:不要红),点 + 计时,× 占发送键的位;字先收起来,键盘也收(免得往看不见的框里打字)
     func recVisual(_ on: Bool, animated: Bool = true) {
         guard avatarOn else {
             micBtn?.tintColor = on ? UIColor.systemRed : chipFgC
@@ -2800,7 +2808,8 @@ public class NativeInputPlugin: CAPPlugin, CAPBridgedPlugin, UITextViewDelegate 
             recCancelBtn?.isHidden = !on
             return
         }
-        avVoiceBtn?.tintColor = on ? UIColor.systemRed : chipFgC
+        avVoiceBtn?.tintColor = on ? NativeInputPlugin.starTint : chipFgC
+        avRecDot?.backgroundColor = NativeInputPlugin.starTint
         avRecDot?.isHidden = !on
         avRecL?.isHidden = !on
         if on {

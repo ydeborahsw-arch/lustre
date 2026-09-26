@@ -91,9 +91,15 @@ struct LXChatTheme {
 
     mutating func loadCached(_ moon: String) {
         if let p = LXMoonPalette.chat[moon] { take(p) }
-        guard let data = UserDefaults.standard.data(forKey: Self.cacheKey(moon)),
-              let d = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { return }
-        take(d)
+        if let data = UserDefaults.standard.data(forKey: Self.cacheKey(moon)),
+           let d = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] { take(d) }
+        fnStar = Self.star(moon)
+    }
+
+    /// 0926 她:星芒色白天和月夜同一支浅蓝,只有半月是橙。按月相定死,网页传来的和旧缓存里存的都不认
+    static func star(_ moon: String) -> UIColor {
+        moon == "half" ? UIColor(red: 0xD9/255, green: 0x77/255, blue: 0x57/255, alpha: 1)
+                       : UIColor(red: 0xB6/255, green: 0xD6/255, blue: 0xE8/255, alpha: 1)
     }
 
     mutating func take(_ call: CAPPluginCall) {
@@ -120,7 +126,7 @@ struct LXChatTheme {
         if let v = str("aiFg"), let c = NativeInputPlugin.color(v) { aiFg = c }
         if let v = str("faint"), let c = NativeInputPlugin.color(v) { faint = c }
         if let v = str("fn"), let c = NativeInputPlugin.color(v) { fn = c }
-        if let v = str("fnStar"), let c = NativeInputPlugin.color(v) { fnStar = c }
+        // fnStar 不从这里取:按月相定死,见 star(_:)
         if let v = str("think"), let c = NativeInputPlugin.color(v) { think = c }
         if let v = str("accent"), let c = NativeInputPlugin.color(v) { accent = c }
         if let v = str("thinkBody"), let c = NativeInputPlugin.color(v) { thinkBody = c }
@@ -152,7 +158,7 @@ struct LXChatTheme {
         if let v = call.getString("aiFg"), let c = NativeInputPlugin.color(v) { aiFg = c }
         if let v = call.getString("faint"), let c = NativeInputPlugin.color(v) { faint = c }
         if let v = call.getString("fn"), let c = NativeInputPlugin.color(v) { fn = c }
-        if let v = call.getString("fnStar"), let c = NativeInputPlugin.color(v) { fnStar = c }
+        fnStar = Self.star(call.getString("moon") ?? RPSpec.moonState)
         if let v = call.getString("think"), let c = NativeInputPlugin.color(v) { think = c }
         if let v = call.getString("accent"), let c = NativeInputPlugin.color(v) { accent = c }
         if let v = call.getString("thinkBody"), let c = NativeInputPlugin.color(v) { thinkBody = c }
@@ -1304,7 +1310,7 @@ enum LXMoonPalette {
         return order[(i + 1) % order.count]
     }
     static let chat: [String: [String: Any]] = [
-        "day": ["bg": "#f6fbff", "me": "#c8d8e8", "meFg": "#2a3a4d", "aiFg": "#2a3a4d", "faint": "#92a6b8", "fn": "#92a6b8", "fnStar": "#d97757", "think": "#93b2d2", "accent": "#618fbd", "thinkBody": "#769ec6", "accentFg": "#2a3a4d", "hairline": "#7a8c9e", "hairlineA": 0.22, "cardBg": "#fbfdff", "segTrack": "#eff3f6", "menuBg": "#f4f8fb", "fg": "#2a3a4d", "textSoft": "#64798d", "sliderThumb": "#618fbd", "sendBg": "#c8d8e8", "rowPress": "#ecf3f8", "sidePad": 16, "hdrBtnBg": "#fafcfe", "hdrBtnFg": "#2a3a4d", "hdrRing": "#ffffff", "hdrRingA": 0.95, "pillBg": "#fafcfe", "pillFg": "#93b2d2", "statusFs": 12],
+        "day": ["bg": "#f6fbff", "me": "#c8d8e8", "meFg": "#2a3a4d", "aiFg": "#2a3a4d", "faint": "#92a6b8", "fn": "#92a6b8", "fnStar": "#b6d6e8", "think": "#93b2d2", "accent": "#618fbd", "thinkBody": "#769ec6", "accentFg": "#2a3a4d", "hairline": "#7a8c9e", "hairlineA": 0.22, "cardBg": "#fbfdff", "segTrack": "#eff3f6", "menuBg": "#f4f8fb", "fg": "#2a3a4d", "textSoft": "#64798d", "sliderThumb": "#618fbd", "sendBg": "#c8d8e8", "rowPress": "#ecf3f8", "sidePad": 16, "hdrBtnBg": "#fafcfe", "hdrBtnFg": "#2a3a4d", "hdrRing": "#ffffff", "hdrRingA": 0.95, "pillBg": "#fafcfe", "pillFg": "#93b2d2", "statusFs": 12],
         "half": ["bg": "#191917", "me": "#111110", "meFg": "#e9e5dc", "aiFg": "#e9e5dc", "faint": "#6e6b64", "fn": "#a5a198", "fnStar": "#d97757", "think": "#a5a198", "accent": "#da7a55", "thinkBody": "#8b8880", "accentFg": "#191917", "hairline": "#ffffff", "hairlineA": 0.08, "cardBg": "#21211f", "segTrack": "#373735", "menuBg": "#202020", "fg": "#e9e5dc", "textSoft": "#a5a198", "sliderThumb": "#da7a55", "sendBg": "#e9e5dc", "rowPress": "#232525", "sidePad": 16, "hdrBtnBg": "#242422", "hdrBtnFg": "#e9e5dc", "hdrRing": "#e9e5dc", "hdrRingA": 0.18, "pillBg": "#242422", "pillFg": "#a5a198", "statusFs": 12],
         "moon": ["bg": "#000000", "me": "#26252a", "meFg": "#ffffff", "aiFg": "#f5f5f5", "faint": "#717e97", "fn": "#d7eaf8", "fnStar": "#b6d6e8", "think": "#d7eaf8", "accent": "#a9d9ee", "thinkBody": "#b0b0b0", "accentFg": "#05070b", "hairline": "#dfe3ee", "hairlineA": 0.1, "cardBg": "#26252a", "segTrack": "#39383e", "menuBg": "#000000", "fg": "#f5f5f5", "textSoft": "#a5b0c6", "sliderThumb": "#b6d6e8", "sendBg": "#b6d6e8", "rowPress": "#0d0e10", "sidePad": 16, "hdrBtnBg": "#121212", "hdrBtnFg": "#d7eaf8", "hdrRing": "#d6dbea", "hdrRingA": 0.18, "pillBg": "#121212", "pillFg": "#d7eaf8", "statusFs": 12],
     ]
@@ -4394,8 +4400,8 @@ public class ChatListPlugin: CAPPlugin, CAPBridgedPlugin, UITableViewDataSource,
     let data = LXChatData()
     var theme = LXChatTheme() {
         didSet {
-            // 输入栏胶囊里的星芒跟页脚星同色,换月相时跟着换
-            if oldValue.fnStar != theme.fnStar { NativeInputPlugin.live?.avModelBtn?.tintColor = theme.fnStar }
+            // 输入栏胶囊里的星芒、录音中的语音圆和点跟页脚星同色,换月相时跟着换
+            if oldValue.fnStar != theme.fnStar { NativeInputPlugin.live?.syncStarTint() }
             // 0926 头像模式换输入栏样式。switchMoon 会先清零再恢复(假翻转),攒到下一拍只认最后的值;只动输入栏,聊天页不重建
             if oldValue.avatars != theme.avatars, !composerStyleQueued {
                 composerStyleQueued = true
@@ -5279,6 +5285,12 @@ public class ChatListPlugin: CAPPlugin, CAPBridgedPlugin, UITableViewDataSource,
         guard LustreConfig.isPreview, !composerTourDone, let t = table else { return }
         composerTourDone = true
         theme.avatars = true
+        // 这条路线的截图只要输入栏:聊天列表整个藏起来,屏幕上不留任何对话内容;每秒再藏一次,防别处把它放回来
+        t.isHidden = true
+        Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] tm in
+            guard let s = self else { tm.invalidate(); return }
+            s.table?.isHidden = true
+        }
         UIView.performWithoutAnimation { reloadTable(t) }
         HomePlugin.live?.previewDismissEarly()
         DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in

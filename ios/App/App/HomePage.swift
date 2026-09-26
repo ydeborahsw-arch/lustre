@@ -2457,7 +2457,8 @@ public class HomePlugin: CAPPlugin, CAPBridgedPlugin, UIGestureRecognizerDelegat
     var homeDrawerOpen: Bool { !(home?.isHidden ?? true) && (home?.transform.tx ?? 0) > 0 }
     override public func load() {
         Self.live = self
-        guard LustreConfig.isPreview else { return }
+        // composer 路线只拍输入栏:下面这套首页自检 62 秒后会铺满全屏,不跑
+        guard LustreConfig.isPreview, LustreConfig.previewFocus != "composer" else { return }
         DispatchQueue.main.asyncAfter(deadline: .now() + 62) { [weak self] in
             guard let s = self, let host = s.bridge?.viewController?.view else { return }
             let v = HomeView(theme: HomeTheme(), flameURL: "")

@@ -73,7 +73,8 @@ jobs:
           shot() { xcrun simctl io "$UDID" screenshot "$PWD/shots/$1.png" >/dev/null 2>&1 || true; }
           xcrun simctl launch "$UDID" "$LX_BUNDLE"
           if [ "$LX_PREVIEW_FOCUS" = "composer" ]; then
-            # Input bar only: the app parks it empty / with text / recording for about 20 s each; a shot every 5 s covers all three
+            # Input bar only: the app parks it empty / with text / recording for about 20 s each; a shot every 5 s covers all three.
+            # The app hides the chat list in this route, so these shots hold nothing but the bar.
             sleep 5
             for t in $(seq 10 5 85); do sleep 5; shot c$t; done
           else
@@ -94,9 +95,11 @@ jobs:
           xcrun simctl spawn "$UDID" log show --last 6m --style compact --predicate 'process == "App"' > shots/diag-applog.txt 2>&1 || true
           cp ~/Library/Logs/DiagnosticReports/App*.ips shots/ 2>/dev/null || true
           xcrun simctl terminate "$UDID" "$LX_BUNDLE" || true
-          sleep 2
-          xcrun simctl launch "$UDID" "$LX_BUNDLE"
-          sleep 10;  shot p10
+          if [ "$LX_PREVIEW_FOCUS" != "composer" ]; then
+            sleep 2
+            xcrun simctl launch "$UDID" "$LX_BUNDLE"
+            sleep 10;  shot p10
+          fi
           xcrun simctl shutdown "$UDID" || true
           n=0
           for f in shots/*; do
