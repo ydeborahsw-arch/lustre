@@ -1,0 +1,9 @@
+node_modules/
+ios/App/Pods/
+ios/App/App/capacitor.config.json
+ios/App/App/public/
+.gh-token
+*.p12
+*.p8
+*.mobileprovision
+ios/App/App/AnthropicSans.ttf

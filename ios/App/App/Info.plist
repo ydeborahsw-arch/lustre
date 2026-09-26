@@ -1,0 +1,135 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>BGTaskSchedulerPermittedIdentifiers</key>
+	<array>
+		<string>__LX_BUNDLE__.refresh</string>
+	</array>
+	<key>CAPACITOR_DEBUG</key>
+	<string>$(CAPACITOR_DEBUG)</string>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>en</string>
+	<key>CFBundleDisplayName</key>
+	<string>Lustre</string>
+	<key>CFBundleExecutable</key>
+	<string>$(EXECUTABLE_NAME)</string>
+	<key>CFBundleIdentifier</key>
+	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleName</key>
+	<string>$(PRODUCT_NAME)</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>$(MARKETING_VERSION)</string>
+	<key>CFBundleVersion</key>
+	<string>$(CURRENT_PROJECT_VERSION)</string>
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
+	<key>LSRequiresIPhoneOS</key>
+	<true/>
+	<key>LSSupportsOpeningDocumentsInPlace</key>
+	<true/>
+	<key>NSCalendarsFullAccessUsageDescription</key>
+	<string>Lustre reads and writes your calendar so your companion can see and add events.</string>
+	<key>NSCalendarsUsageDescription</key>
+	<string>Lustre reads and writes your calendar so your companion can see and add events.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>Take photos to share in chat.</string>
+	<key>NSFaceIDUsageDescription</key>
+	<string>打开 Lustre 时用面容 ID 确认是你。</string>
+	<key>NSHealthShareUsageDescription</key>
+	<string>Lustre reads your health data so your companion can care about you in real time.</string>
+	<key>NSHealthUpdateUsageDescription</key>
+	<string>Not used.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>Lustre uses your location for weather and so your companion knows where you are.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Record voice messages in chat.</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>把聊天里的图片存进你的相册。</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Attach photos from your library.</string>
+	<key>NSRemindersFullAccessUsageDescription</key>
+	<string>Lustre reads and writes your reminders so your companion can see and add to-dos.</string>
+	<key>NSRemindersUsageDescription</key>
+	<string>Lustre reads and writes your reminders so your companion can see and add to-dos.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>Transcribe your voice during calls.</string>
+	<key>UIAppFonts</key>
+	<array>
+		<string>AnthropicSans.ttf</string>
+	</array>
+	<key>UIApplicationSceneManifest</key>
+	<dict>
+		<key>UIApplicationSupportsMultipleScenes</key>
+		<false/>
+		<key>UISceneConfigurations</key>
+		<dict>
+			<key>UIWindowSceneSessionRoleApplication</key>
+			<array>
+				<dict>
+					<key>UISceneConfigurationName</key>
+					<string>Default Configuration</string>
+					<key>UISceneDelegateClassName</key>
+					<string>$(PRODUCT_MODULE_NAME).SceneDelegate</string>
+					<key>UISceneStoryboardFile</key>
+					<string>Main</string>
+				</dict>
+			</array>
+		</dict>
+	</dict>
+	<key>UIApplicationShortcutItems</key>
+	<array>
+		<dict>
+			<key>UIApplicationShortcutItemIconSymbolName</key>
+			<string>bubble.left.fill</string>
+			<key>UIApplicationShortcutItemTitle</key>
+			<string>__LX_YAN__</string>
+			<key>UIApplicationShortcutItemType</key>
+			<string>__LX_BUNDLE__.yan</string>
+		</dict>
+		<dict>
+			<key>UIApplicationShortcutItemIconSymbolName</key>
+			<string>house.fill</string>
+			<key>UIApplicationShortcutItemTitle</key>
+			<string>Home</string>
+			<key>UIApplicationShortcutItemType</key>
+			<string>__LX_BUNDLE__.home</string>
+		</dict>
+	</array>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>fetch</string>
+		<string>audio</string>
+		<string>voip</string>
+	</array>
+	<key>UIFileSharingEnabled</key>
+	<true/>
+	<key>UILaunchStoryboardName</key>
+	<string>LaunchScreen</string>
+	<key>UIMainStoryboardFile</key>
+	<string>Main</string>
+	<key>UIRequiredDeviceCapabilities</key>
+	<array>
+		<string>armv7</string>
+	</array>
+	<key>UISupportedInterfaceOrientations</key>
+	<array>
+		<string>UIInterfaceOrientationPortrait</string>
+		<string>UIInterfaceOrientationLandscapeLeft</string>
+		<string>UIInterfaceOrientationLandscapeRight</string>
+	</array>
+	<key>UISupportedInterfaceOrientations~ipad</key>
+	<array>
+		<string>UIInterfaceOrientationPortrait</string>
+		<string>UIInterfaceOrientationPortraitUpsideDown</string>
+		<string>UIInterfaceOrientationLandscapeLeft</string>
+		<string>UIInterfaceOrientationLandscapeRight</string>
+	</array>
+	<key>UIViewControllerBasedStatusBarAppearance</key>
+	<true/>
+</dict>
+</plist>

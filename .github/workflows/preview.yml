@@ -1,0 +1,92 @@
+name: Simulator preview
+# Runs the app in the iOS simulator and takes screenshots. Screenshots contain live account data,
+# so they are sent straight to a private upload endpoint and never stored as build artifacts.
+on:
+  workflow_dispatch:
+
+env:
+  LX_ORIGIN: ${{ secrets.LX_ORIGIN }}
+  LX_BUNDLE: ${{ secrets.LX_BUNDLE }}
+  LX_TEAM: ${{ secrets.LX_TEAM }}
+  LX_AUTH: ${{ secrets.LX_AUTH }}
+  LX_YAN: ${{ secrets.LX_YAN }}
+  LX_ZHAO: ${{ secrets.LX_ZHAO }}
+  LX_ZHAO2: ${{ secrets.LX_ZHAO2 }}
+  LX_FONT_URL: ${{ secrets.LX_FONT_URL }}
+  LX_SHOT_URL: ${{ secrets.LX_SHOT_URL }}
+
+jobs:
+  preview:
+    runs-on: macos-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - name: Inject private values
+        run: python3 .github/inject.py
+      - name: Fetch licensed font (not stored in this repo)
+        run: |
+          echo "::add-mask::$LX_FONT_URL"
+          echo "::add-mask::$LX_SHOT_URL"
+          curl -fsSL "$LX_FONT_URL" -o ios/App/App/AnthropicSans.ttf
+      - name: Mark build as preview
+        run: |
+          python3 - <<'EOF'
+          import json
+          c = json.load(open('capacitor.config.json'))
+          c.setdefault('lustre', {})['preview'] = True
+          json.dump(c, open('capacitor.config.json', 'w'), indent=2)
+          EOF
+      - name: Install deps & sync
+        run: |
+          npm ci || npm install
+          npx cap sync ios
+      - name: Build for simulator
+        run: |
+          cd ios/App
+          xcodebuild -project App.xcodeproj -scheme App -configuration Debug \
+            -sdk iphonesimulator -derivedDataPath $PWD/build/sim \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO build > build.log 2>&1 || (tail -80 build.log; exit 1)
+          tail -3 build.log
+      - name: Boot, launch, screenshot, send privately
+        run: |
+          UDID=$(xcrun simctl list devices available | grep -E 'iPhone 1[5-9]|iPhone [2-9][0-9]' | head -1 | grep -oE '[A-F0-9-]{36}' || true)
+          if [ -z "$UDID" ]; then UDID=$(xcrun simctl list devices available | grep iPhone | head -1 | grep -oE '[A-F0-9-]{36}'); fi
+          xcrun simctl boot "$UDID" || true
+          xcrun simctl bootstatus "$UDID" -b
+          APP=$(find ios/App/build/sim/Build/Products -name App.app -maxdepth 3 | head -1)
+          xcrun simctl install "$UDID" "$APP"
+          xcrun simctl privacy "$UDID" grant all "$LX_BUNDLE" || true
+          xcrun simctl privacy "$UDID" grant reminders "$LX_BUNDLE" 2>/dev/null || true
+          xcrun simctl spawn "$UDID" defaults write -g HardwareKeyboardEnabled -bool false || true
+          mkdir -p shots
+          shot() { xcrun simctl io "$UDID" screenshot "$PWD/shots/$1.png" >/dev/null 2>&1 || true; }
+          xcrun simctl launch "$UDID" "$LX_BUNDLE"
+          sleep 18;  shot p01
+          sleep 12;  shot p02
+          sleep 12;  shot p03
+          sleep 12;  shot p04
+          sleep 24;  shot p05
+          sleep 12;  shot p06
+          sleep 12;  shot p07
+          sleep 22;  shot p08
+          sleep 12;  shot p09
+          sleep 12;  shot p09b
+          sleep 6;   shot p09c
+          PID=$(pgrep -f "App.app/App" | head -1 || true)
+          if [ -n "$PID" ]; then sample "$PID" 3 -file shots/diag-sample.txt >/dev/null 2>&1 || true; fi
+          xcrun simctl spawn "$UDID" log show --last 6m --style compact --predicate 'process == "App"' > shots/diag-applog.txt 2>&1 || true
+          cp ~/Library/Logs/DiagnosticReports/App*.ips shots/ 2>/dev/null || true
+          xcrun simctl terminate "$UDID" "$LX_BUNDLE" || true
+          sleep 2
+          xcrun simctl launch "$UDID" "$LX_BUNDLE"
+          sleep 10;  shot p10
+          xcrun simctl shutdown "$UDID" || true
+          n=0
+          for f in shots/*; do
+            curl -fsS -o /dev/null -F "file=@$f;filename=pv-${GITHUB_RUN_NUMBER}-$(basename $f)" "$LX_SHOT_URL" && n=$((n+1))
+          done
+          echo "sent $n screenshots"
+          rm -rf shots
+          test "$n" -gt 0

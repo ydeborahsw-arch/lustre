@@ -1,0 +1,12 @@
+{
+  "appId": "__LX_BUNDLE__",
+  "appName": "Lustre",
+  "webDir": "www",
+  "ios": {
+    "contentInset": "never",
+    "backgroundColor": "#191917"
+  },
+  "lustre": {
+    "auth": "__LX_AUTH__"
+  }
+}
