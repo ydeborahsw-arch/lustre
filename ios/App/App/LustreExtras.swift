@@ -1659,6 +1659,34 @@ public class NativeInputPlugin: CAPPlugin, CAPBridgedPlugin, UITextViewDelegate 
         updateCardHeight()
     }
 
+    /// 预览专用:占位符三种居中法轮流拍,给她挑(先收掉拼音试验留下的焦点和拼音)
+    func previewPhPick(_ k: Int) {
+        guard LustreConfig.isPreview, let t = tv else { return }
+        t.unmarkText()
+        _ = t.resignFirstResponder()
+        t.text = ""
+        Self.phCenterPick = k
+        phLabel?.isHidden = false
+        layoutPlaceholder()
+        syncSendIcon()
+        updateCardHeight()
+    }
+
+    /// 预览专用(0926 拼音下划线划过 g、q 尾巴的试验):框里放一段正在输入的拼音,带系统那条下划线。
+    /// 先摘掉代理(不往外发任何"在输入 / 拿到焦点"),给一个空的输入面板再拿焦点,免得弹键盘把栏顶上去
+    func previewMarked(_ s: String) {
+        guard LustreConfig.isPreview, let t = tv else { return }
+        t.delegate = nil
+        t.inputView = UIView(frame: .zero)
+        t.inputAccessoryView = nil
+        t.text = ""
+        _ = t.becomeFirstResponder()
+        t.setMarkedText(s, selectedRange: NSRange(location: (s as NSString).length, length: 0))
+        phLabel?.isHidden = true
+        syncSendIcon()
+        updateCardHeight()
+    }
+
     func tvConstraintsInCard(_ t: UITextView, _ cardV: UIView) -> [NSLayoutConstraint] {
         if avatarOn, let pill = avPillG {
             // 头像样式:字在药丸里,字左边离药丸 15、右边整段留 43(3 + 发送键 34 + 6),发送键出没字不挪;
@@ -2009,9 +2037,10 @@ public class NativeInputPlugin: CAPPlugin, CAPBridgedPlugin, UITextViewDelegate 
         if avatarOn && recorder != nil { avVoiceBtn?.tintColor = c }
     }
 
-    // 0926 头像样式三颗图标,量她的参考图 1:1:外圈 d26.7、线宽 1.67,模板图由主题图标墨着色
+    // 0926 头像样式三颗图标,量她的参考图 1:1:外圈 d26.7,模板图由主题图标墨着色。
+    // 线宽原来 1.67;0926 她:加号的横竖比外圈细,外圈和语音的线都用加号那个粗细 → 1.5
     private static let avIconD: CGFloat = 26.7
-    private static let avIconW: CGFloat = 1.67
+    private static let avIconW: CGFloat = 1.5
     private static func avRing() {
         let d = avIconD, w = avIconW
         let ring = UIBezierPath(ovalIn: CGRect(x: w / 2, y: w / 2, width: d - w, height: d - w))
@@ -2085,16 +2114,23 @@ public class NativeInputPlugin: CAPPlugin, CAPBridgedPlugin, UITextViewDelegate 
         var y = t.textContainerInset.top
         // 0926 她:占位符上下留白要视觉上一致。头像样式框一行高时,这一行的行框正好在框的正中,但 "Message" 的墨迹
         // (M 顶到 g 底)比行框中线低约 2pt。按字形实际外框把墨迹中线对到行框中线;打出来的字不动
+        // 0926 她:"还是有点靠上,要视觉上绝对对称"——墨迹整框居中时,g 那根细尾巴把整个字往上顶了约 2pt。
+        // 改成按字身居中(不算尾巴):0 = 小写那一截(基线到 x 高)居中,1 = 小写和大写两截中心取平均,
+        // 2 = 大写那一截(基线到 M 顶)居中。预览里三种轮流给她挑,挑定了再把默认值钉死
         if avatarOn, let f = l.font, let tf = t.font, let s = l.text, !s.isEmpty {
-            let ink = CTLineGetBoundsWithOptions(
-                CTLineCreateWithAttributedString(NSAttributedString(string: s, attributes: [.font: f])),
-                .useGlyphPathBounds)
-            y += tf.lineHeight / 2 - f.ascender + ink.midY   // 行框按打字的字号,墨迹按占位符的字号
+            let mid: CGFloat
+            switch Self.phCenterPick {
+            case 0: mid = f.xHeight / 2
+            case 2: mid = f.capHeight / 2
+            default: mid = (f.xHeight + f.capHeight) / 4
+            }
+            y += tf.lineHeight / 2 - f.ascender + mid   // 行框按打字的字号,字身按占位符的字号
         }
         l.frame.origin = CGPoint(x: t.textContainerInset.left, y: y)
         if card != nil, !cardV_suspended() { l.isHidden = !(t.text ?? "").isEmpty }
     }
     func cardV_suspended() -> Bool { return card?.isHidden ?? true }
+    static var phCenterPick = 1
 
     func rebuildAtts(_ atts: [Any]) {
         guard let stack = attsStack, let row = attsRow, let hC = attsHC else { return }

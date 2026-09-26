@@ -52,6 +52,8 @@ struct LXMsg {
     var failed = false
     /// 0925:拍一拍的动作——她在双击头像的卡里自己写的,空=拍了拍
     var patAct: String = ""
+    /// 0926 她:双击自己的头像 = 拍自己;他也能拍他自己
+    var patSelf = false
 }
 
 struct LXChatTheme {
@@ -404,7 +406,8 @@ final class LXChatData {
                      quoteName: qName, quoteText: qText, quoteId: qId,
                      servesId: (meta["serves_id"] as? NSNumber)?.int64Value ?? 0,
                      cid: (meta["cid"] as? String) ?? "",
-                     patAct: (meta["act"] as? String) ?? "")
+                     patAct: (meta["act"] as? String) ?? "",
+                     patSelf: (meta["self"] as? Bool) ?? false)
     }
 
     private func inSession(_ m: LXMsg) -> Bool {
@@ -974,7 +977,8 @@ final class LXChatData {
         let ai = LXNick.of(session: m.session)
         let t = m.text.trimmingCharacters(in: .whitespacesAndNewlines)
         let act = m.patAct.isEmpty ? "拍了拍" : m.patAct
-        let head = m.from == "human" ? "我\(act) \(ai)" : "\(ai) \(act)我"
+        let head = m.patSelf ? (m.from == "human" ? "我\(act)自己" : "\(ai) \(act)自己")
+                             : (m.from == "human" ? "我\(act) \(ai)" : "\(ai) \(act)我")
         return t.isEmpty ? head : head + "：" + t
     }
 
@@ -2155,7 +2159,7 @@ final class LXBubbleCell: UITableViewCell {
     var onAvatarTap: ((LXMsg) -> Void)?
     var onAvatarDoubleTap: ((LXMsg) -> Void)?
     @objc private func avatarDoubleTapped() {
-        guard let m = curMsg, m.from != "human" else { return }
+        guard let m = curMsg else { return }   // 0926:双击自己的头像也行(拍自己)
         onAvatarDoubleTap?(m)
     }
     @objc private func avatarTapped() {
@@ -5479,10 +5483,12 @@ public class ChatListPlugin: CAPPlugin, CAPBridgedPlugin, UITableViewDataSource,
     func askPat(_ m: LXMsg) {
         UIImpactFeedbackGenerator(style: .medium).impactOccurred()
         let ai = LXNick.of(session: m.session)
-        // 0925 她的单:动作也能改;每个人各记各的,下次双击还是上回那个
-        let key = "lx.pat.act." + m.session
+        // 0926 她:双击自己的头像 = 拍自己,动作和后面的话一样能改
+        let me = m.from == "human"
+        // 0925 她的单:动作也能改;每个人各记各的,下次双击还是上回那个(拍自己另记一份)
+        let key = "lx.pat.act." + (me ? "self." : "") + m.session
         let kb: UIKeyboardAppearance = RPSpec.moonState == "day" ? .light : .dark
-        let a = UIAlertController(title: ai, message: nil, preferredStyle: .alert)
+        let a = UIAlertController(title: me ? "拍自己" : ai, message: nil, preferredStyle: .alert)
         a.addTextField { tf in
             tf.text = UserDefaults.standard.string(forKey: key) ?? "拍了拍"
             tf.placeholder = "拍了拍"
@@ -5502,6 +5508,7 @@ public class ChatListPlugin: CAPPlugin, CAPBridgedPlugin, UITableViewDataSource,
             UserDefaults.standard.set(act.isEmpty ? "拍了拍" : act, forKey: key)
             var body: [String: Any] = ["text": t]
             if !act.isEmpty { body["act"] = act }
+            if me { body["self"] = true }
             if !m.session.isEmpty { body["api_session"] = m.session }
             self?.data.post("/app/pat", body) { ok in
                 DispatchQueue.main.async { if !ok { self?.toast("没拍到，再试试") } }
@@ -5779,6 +5786,15 @@ public class ChatListPlugin: CAPPlugin, CAPBridgedPlugin, UITableViewDataSource,
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 105) {
             NativeInputPlugin.live?.previewComposer(text: "Preview\nSecond line\nThird line")
+        }
+        // 0926 拼音下划线试验:115 秒回空栏、放一段带尾巴字母的拼音(g q y p j),拍到 c135
+        DispatchQueue.main.asyncAfter(deadline: .now() + 115) {
+            NativeInputPlugin.live?.previewComposer(text: "")
+            NativeInputPlugin.live?.previewMarked("hao qi gy pj")
+        }
+        // 0926 她要占位符视觉上绝对对称:三种居中法各停 10 秒(127 小写居中 / 137 两者平均 / 147 大写居中),拍到 c160
+        for (i, at) in [127.0, 137.0, 147.0].enumerated() {
+            DispatchQueue.main.asyncAfter(deadline: .now() + at) { NativeInputPlugin.live?.previewPhPick(i) }
         }
     }
 
