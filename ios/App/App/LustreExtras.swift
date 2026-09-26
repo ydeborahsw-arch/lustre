@@ -1089,9 +1089,8 @@ public class NativeInputPlugin: CAPPlugin, CAPBridgedPlugin, UITextViewDelegate 
     func applyStyle(_ call: CAPPluginCall) {
         guard let t = tv else { return }
         if let hex = call.getString("color"), let c = NativeInputPlugin.color(hex) { t.textColor = c }
-        let size = CGFloat(call.getFloat("fontSize") ?? 16)
-        t.font = UIFont(name: "AnthropicSansWebVariable-TextRegular", size: size)
-            ?? UIFont.systemFont(ofSize: size)
+        // 0926 她:输入框的字跟聊天正文一样大(头像样式 14、普通样式 15,同一支字体连中文回退);光标跟着字高走
+        t.font = LXBubbleCell.bubbleFont(avatarOn)
         let padTop = CGFloat(call.getFloat("padTop") ?? 9)
         let padBottom = call.getFloat("padBottom").map { CGFloat($0) } ?? padTop
         let padLeft = CGFloat(call.getFloat("padLeft") ?? 2)
@@ -1590,6 +1589,7 @@ public class NativeInputPlugin: CAPPlugin, CAPBridgedPlugin, UITextViewDelegate 
         let rec = recorder != nil
         if rec { recVisual(false, animated: false) }
         avatarOn = on
+        tv?.font = LXBubbleCell.bubbleFont(on)
         if on {
             savedShadowHidden = cardShadow?.isHidden ?? true
             savedBorderW = cardV.layer.borderWidth
@@ -1963,9 +1963,10 @@ public class NativeInputPlugin: CAPPlugin, CAPBridgedPlugin, UITextViewDelegate 
 
     /// 星芒色:跟聊天页页脚那颗星同一个色(白天和月夜浅蓝,半月橙)
     static var starTint: UIColor { ChatListPlugin.live?.theme.fnStar ?? LXSheetInk.star }
-    /// 光标和拼音下划线:顶栏状态字那档色(白天 #93B2D2 / 半月 #A5A198 / 月夜 #D7EAF8);0926 她:只有星芒图案用星芒色
+    /// 光标和拼音下划线:顶栏状态字那档亮蓝;0926 她:只有星芒图案用星芒色,白天跟月夜一模一样(#D7EAF8),半月用它自己那档 #A5A198
     static var caretTint: UIColor {
-        (LXMoonPalette.chat[RPSpec.moonState]?["pillFg"] as? String).flatMap { NativeInputPlugin.color($0) }
+        let m = RPSpec.moonState == "half" ? "half" : "moon"
+        return (LXMoonPalette.chat[m]?["pillFg"] as? String).flatMap { NativeInputPlugin.color($0) }
             ?? UIColor(red: 0xD7 / 255, green: 0xEA / 255, blue: 0xF8 / 255, alpha: 1)
     }
     /// 换月相时星芒色跟着换:胶囊里的星芒,录音中的语音圆和点

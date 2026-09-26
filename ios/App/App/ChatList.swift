@@ -1605,7 +1605,7 @@ enum LXMoonPalette {
         "moon": ["bg": "#000000", "me": "#26252a", "meFg": "#ffffff", "aiFg": "#f5f5f5", "faint": "#717e97", "fn": "#d7eaf8", "fnStar": "#b6d6e8", "think": "#d7eaf8", "accent": "#a9d9ee", "thinkBody": "#b0b0b0", "accentFg": "#05070b", "hairline": "#dfe3ee", "hairlineA": 0.1, "cardBg": "#26252a", "segTrack": "#39383e", "menuBg": "#000000", "fg": "#f5f5f5", "textSoft": "#a5b0c6", "sliderThumb": "#b6d6e8", "sendBg": "#b6d6e8", "rowPress": "#0d0e10", "sidePad": 16, "hdrBtnBg": "#121212", "hdrBtnFg": "#d7eaf8", "hdrRing": "#d6dbea", "hdrRingA": 0.18, "pillBg": "#121212", "pillFg": "#d7eaf8", "statusFs": 12],
     ]
     static let card: [String: [String: Any]] = [
-        "day": ["bg": "#fafcfe", "bgAlpha": 0.86, "border": "#ffffff", "borderAlpha": 0.95, "sendBg": "#C8D8E8", "sendFg": "#2A3A4D", "color": "#2A3A4D", "kbDark": false, "phColor": "#92a6b8", "modelFg": "#2a3a4d", "effortFg": "#64798d", "accent": "#618FBD", "quoteBg": "#fafcfe", "quoteBgA": 0.92, "quoteLine": "#9eafbc", "quoteLineA": 0.16, "textSoft": "#64798D", "textFaint": "#92A6B8"],
+        "day": ["bg": "#fafcfe", "bgAlpha": 0.86, "border": "#ffffff", "borderAlpha": 0.95, "sendBg": "#D7EAF8", "sendFg": "#05070B", "color": "#2A3A4D", "kbDark": false, "phColor": "#92a6b8", "modelFg": "#2a3a4d", "effortFg": "#64798d", "accent": "#618FBD", "quoteBg": "#fafcfe", "quoteBgA": 0.92, "quoteLine": "#9eafbc", "quoteLineA": 0.16, "textSoft": "#64798D", "textFaint": "#92A6B8"],   // 0926 她:白天发送键跟月夜一模一样
         "half": ["bg": "#242422", "bgAlpha": 0.55, "border": "#ffffff", "borderAlpha": 0.1, "sendBg": "#E9E5DC", "sendFg": "#191917", "color": "#E9E5DC", "kbDark": true, "phColor": "#6e6b64", "modelFg": "#e9e5dc", "effortFg": "#a5a198", "accent": "#DA7A55", "quoteBg": "#222220", "quoteBgA": 0.94, "quoteLine": "#ffffff", "quoteLineA": 0.08, "textSoft": "#A5A198", "textFaint": "#6E6B64"],
         "moon": ["bg": "#121212", "bgAlpha": 0.55, "border": "#ffffff", "borderAlpha": 0.1, "sendBg": "#D7EAF8", "sendFg": "#05070B", "color": "#E3E2E7", "kbDark": true, "phColor": "#78859b", "modelFg": "#ffffff", "effortFg": "#78859b", "accent": "#A9D9EE", "quoteBg": "#121212", "quoteBgA": 1, "quoteLine": "#dfe3ee", "quoteLineA": 0.1, "textSoft": "#A5B0C6", "textFaint": "#717E97"],
     ]
@@ -5641,6 +5641,11 @@ public class ChatListPlugin: CAPPlugin, CAPBridgedPlugin, UITableViewDataSource,
         DispatchQueue.main.asyncAfter(deadline: .now() + 60) {
             NativeInputPlugin.live?.exitRecUI()
         }
+        // 0926:白天的发送键、光标要跟月夜一模一样——63 秒切到白天(只存在模拟器本地),空栏拍一轮,72 秒起框里有字
+        DispatchQueue.main.asyncAfter(deadline: .now() + 63) { [weak self] in self?.switchMoon("day") }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 72) {
+            NativeInputPlugin.live?.previewComposer(text: "Preview")
+        }
     }
 
     private var avaCheckDone = false
@@ -7078,7 +7083,8 @@ final class LXThinkOverlay: UIView, UIGestureRecognizerDelegate {
         let t = UILabel()
         t.text = title
         t.font = LXDrawerTint.font(17, wght: 650)
-        t.textColor = theme.aiFg
+        // 0926:卡有自己的底,字用卡的墨。theme.aiFg 会跟着壁纸变(浅壁纸=近黑),放在深色卡上就看不见了
+        t.textColor = LXSheetInk.text
         t.textAlignment = .center
         // 0925 她的单:纯思考的段落照旧是纯文字;只有调工具的那几步才用"图标+短线"(不露 emoji)
         tv.backgroundColor = .clear
@@ -7134,7 +7140,7 @@ final class LXThinkOverlay: UIView, UIGestureRecognizerDelegate {
                 l.textContainer.lineFragmentPadding = 0
                 // 0925 她说换行间距太大:原来把原文里的空行原样留着,再叠行距 7 + 段距 14,两段之间能空出三行。
                 // 改成跟聊天气泡同一套排版(连续空行并成一个换行,固定行高 21.3,段距 11),间距只由排版决定,不看原文有几个空行
-                l.attributedText = LXBubbleCell.styled(body, base: LXBubbleCell.bodyFont(), color: theme.aiFg, lineGap: 21.3)
+                l.attributedText = LXBubbleCell.styled(body, base: LXBubbleCell.bodyFont(), color: LXSheetInk.text, lineGap: 21.3)
                 content.addArrangedSubview(l)
             }
         }
