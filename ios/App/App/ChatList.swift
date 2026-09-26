@@ -520,7 +520,10 @@ final class LXChatData {
     }
 
     private func injectPreviewShowcase() {
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1) { ChatListPlugin.live?.previewAvaTimeCheck() }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
+            if LustreConfig.previewFocus == "composer" { ChatListPlugin.live?.previewComposerTour() }
+            else { ChatListPlugin.live?.previewAvaTimeCheck() }
+        }
         let base = (msgs.last?.id ?? 0) + 1000
         let now = Date()
         let session = (self.session == "__legacy__") ? "" : self.session
@@ -4662,18 +4665,7 @@ public class ChatListPlugin: CAPPlugin, CAPBridgedPlugin, UITableViewDataSource,
         paintStatus(typing: data.typingOn)
         armPushIntake()
 
-        if LustreConfig.isPreview {
-            // 0926 拍头像模式新输入栏:先有字(发送键该露出来,p01),再假装在录(红圆+红点计时+×,p02),然后收回空的
-            DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
-                NativeInputPlugin.live?.previewComposer(text: "Preview")
-            }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 20) {
-                NativeInputPlugin.live?.previewComposer(text: "")
-                NativeInputPlugin.live?.enterRecUI()
-            }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 28) {
-                NativeInputPlugin.live?.exitRecUI()
-            }
+        if LustreConfig.isPreview && LustreConfig.previewFocus != "composer" {
             DispatchQueue.main.asyncAfter(deadline: .now() + 8) { [weak self] in
                 guard let s = self else { return }
                 var target: Int64? = nil
@@ -5269,6 +5261,32 @@ public class ChatListPlugin: CAPPlugin, CAPBridgedPlugin, UITableViewDataSource,
             LXWallStore.set(source: src)
             self.applyWall()
             call.resolve(["ok": true, "has": LXWallStore.image != nil])
+        }
+    }
+
+    private var composerTourDone = false
+    /// 预览专用(路线 composer):只拍头像模式输入栏。直接进聊天页放出输入栏,
+    /// 0–20 秒空栏、20–40 秒框里有字(发送键该露出来)、40–60 秒录音中(红圆+红点计时+×),之后收回空栏
+    func previewComposerTour() {
+        guard LustreConfig.isPreview, !composerTourDone, let t = table else { return }
+        composerTourDone = true
+        theme.avatars = true
+        UIView.performWithoutAnimation { reloadTable(t) }
+        HomePlugin.live?.previewDismissEarly()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
+            HomePlugin.live?.previewDismissEarly()   // 首页晚挂上来的话再摘一次
+            guard let s = self, let t = s.table else { return }
+            s.pinToBottom(t)
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 20) {
+            NativeInputPlugin.live?.previewComposer(text: "Preview")
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 40) {
+            NativeInputPlugin.live?.previewComposer(text: "")
+            NativeInputPlugin.live?.enterRecUI()
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 60) {
+            NativeInputPlugin.live?.exitRecUI()
         }
     }
 

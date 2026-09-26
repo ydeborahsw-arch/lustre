@@ -266,6 +266,12 @@ enum LustreConfig {
         return s.isEmpty
     }()
 
+    /// 预览路线:"composer"=只拍头像模式输入栏;空/"tour"=原来的整套路线
+    static var previewFocus: String = {
+        guard let lx = config["lustre"] as? [String: Any] else { return "" }
+        return (lx["previewFocus"] as? String) ?? ""
+    }()
+
     static var isPreview: Bool = {
         if let lx = config["lustre"] as? [String: Any], lx["preview"] as? Bool == true { return true }
         guard let url = Bundle.main.url(forResource: "capacitor.config", withExtension: "json"),

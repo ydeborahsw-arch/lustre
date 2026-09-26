@@ -2400,6 +2400,8 @@ public class HomePlugin: CAPPlugin, CAPBridgedPlugin, UIGestureRecognizerDelegat
         }
         home?.removeFromSuperview()
         home = nil
+        // 开首页时藏了输入栏,正常关首页会放回来;这条捷径以前漏了,预览里聊天页一直没有输入栏
+        NativeInputPlugin.live?.setCardHidden(false)
     }
 
     func openHomeNative() {

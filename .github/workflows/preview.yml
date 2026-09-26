@@ -3,8 +3,15 @@ name: Simulator preview
 # so they are sent straight to a private upload endpoint and never stored as build artifacts.
 on:
   workflow_dispatch:
+    inputs:
+      focus:
+        description: "tour = the full walk-through; composer = only the avatar-mode input bar"
+        type: choice
+        options: [tour, composer]
+        default: tour
 
 env:
+  LX_PREVIEW_FOCUS: ${{ inputs.focus || 'tour' }}
   LX_ORIGIN: ${{ secrets.LX_ORIGIN }}
   LX_BUNDLE: ${{ secrets.LX_BUNDLE }}
   LX_TEAM: ${{ secrets.LX_TEAM }}
@@ -34,9 +41,10 @@ jobs:
       - name: Mark build as preview
         run: |
           python3 - <<'EOF'
-          import json
+          import json, os
           c = json.load(open('capacitor.config.json'))
           c.setdefault('lustre', {})['preview'] = True
+          c['lustre']['previewFocus'] = os.environ.get('LX_PREVIEW_FOCUS', 'tour')
           json.dump(c, open('capacitor.config.json', 'w'), indent=2)
           EOF
       - name: Install deps & sync
@@ -64,17 +72,23 @@ jobs:
           mkdir -p shots
           shot() { xcrun simctl io "$UDID" screenshot "$PWD/shots/$1.png" >/dev/null 2>&1 || true; }
           xcrun simctl launch "$UDID" "$LX_BUNDLE"
-          sleep 18;  shot p01
-          sleep 12;  shot p02
-          sleep 12;  shot p03
-          sleep 12;  shot p04
-          sleep 24;  shot p05
-          sleep 12;  shot p06
-          sleep 12;  shot p07
-          sleep 22;  shot p08
-          sleep 12;  shot p09
-          sleep 12;  shot p09b
-          sleep 6;   shot p09c
+          if [ "$LX_PREVIEW_FOCUS" = "composer" ]; then
+            # Input bar only: the app parks it empty / with text / recording for about 20 s each; a shot every 5 s covers all three
+            sleep 5
+            for t in $(seq 10 5 85); do sleep 5; shot c$t; done
+          else
+            sleep 18;  shot p01
+            sleep 12;  shot p02
+            sleep 12;  shot p03
+            sleep 12;  shot p04
+            sleep 24;  shot p05
+            sleep 12;  shot p06
+            sleep 12;  shot p07
+            sleep 22;  shot p08
+            sleep 12;  shot p09
+            sleep 12;  shot p09b
+            sleep 6;   shot p09c
+          fi
           PID=$(pgrep -f "App.app/App" | head -1 || true)
           if [ -n "$PID" ]; then sample "$PID" 3 -file shots/diag-sample.txt >/dev/null 2>&1 || true; fi
           xcrun simctl spawn "$UDID" log show --last 6m --style compact --predicate 'process == "App"' > shots/diag-applog.txt 2>&1 || true
