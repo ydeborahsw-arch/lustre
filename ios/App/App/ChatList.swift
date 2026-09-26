@@ -1290,9 +1290,42 @@ enum LXSoftGlassStore {
     }
 }
 
+/// 0926 糊底第二版:一层只管"把背后糊掉"的底层图层,上面只挂一个高斯模糊,半径就是她拉的数(点)。
+/// 不经过系统的磨砂效果,滑出屏幕、回前台、换深浅色时系统都不会把它换成整块磨砂。
+/// 图层和滤镜都是系统内部的东西:类名拆开拼,先问认不认;不认就不糊,退回薄玻璃
+final class LXBackdropBlurView: UIView {
+    private static let backdropClass: AnyClass? = NSClassFromString(["CA", "Backdrop", "Layer"].joined())
+    private static let filterClass: NSObjectProtocol? = {
+        guard let c = NSClassFromString(["CA", "Filter"].joined()) else { return nil }
+        return c as AnyObject as? NSObjectProtocol
+    }()
+    private static let makeSel = NSSelectorFromString(["filter", "With", "Type:"].joined())
+    static var available: Bool { backdropClass != nil && filterClass?.responds(to: makeSel) == true }
+    override class var layerClass: AnyClass { backdropClass ?? CALayer.self }
+
+    var radius: CGFloat = 0 {
+        didSet {
+            guard radius != oldValue else { return }
+            guard let f = Self.filterClass, f.responds(to: Self.makeSel),
+                  let blur = f.perform(Self.makeSel, with: "gaussianBlur")?.takeUnretainedValue() as? NSObject else {
+                layer.filters = nil
+                return
+            }
+            blur.setValue(radius, forKey: "inputRadius")
+            layer.filters = [blur]
+        }
+    }
+
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        // 按屏幕的真实像素取背后的画面,糊的边上不起颗粒
+        if let s = window?.traitCollection.displayScale, s > 0 { layer.setValue(s, forKey: "scale") }
+    }
+}
+
 /// 气泡的薄玻璃(玻璃拟态):很淡的白底 + 一圈上亮下暗的细边,可选轻糊和阴影;数从 LXSoftGlassStore 取,她在右面板 Bubble glass 里自己调。
 /// 亮边从上到下:top → 45% 处 rim×0.2 → 底 浅底黑 rim×0.12 / 深底白 rim×0.08。
-/// 糊:系统没有 2-3pt 这么轻的背景模糊,这里让 UIBlurEffect 的动画停在半路取一小段(偏方,苹果不保证);值为 0 就不建这一层
+/// 糊:LXBackdropBlurView 定死半径;值为 0 就不建这一层
 final class LXSoftGlassView: UIView {
     var light = true { didSet { if light != oldValue { applyInk() } } }
     var maxRadius: CGFloat = 18 { didSet { if maxRadius != oldValue { setNeedsLayout() } } }
@@ -1303,7 +1336,7 @@ final class LXSoftGlassView: UIView {
     private let rim = CAGradientLayer()
     private let rimMask = CAShapeLayer()
     private var rimW: CGFloat = 1
-    private var blurV: UIVisualEffectView?
+    private var blurV: LXBackdropBlurView?
     private var blurR: CGFloat = 0
     private let blurMask = LXPathMaskView()
     private var sig = ""
@@ -1353,35 +1386,26 @@ final class LXSoftGlassView: UIView {
         setNeedsLayout()
     }
 
-    /// 0926 她:糊底要定死在她拉的数。系统公开的模糊只有几档固定的整块磨砂;这里用系统内部的自定义模糊直接给半径
-    /// (点,跟网页小样 blur(px) 同一个数)。效果本身就是这个数,不靠停在半路的动画,滑出屏幕、回前台都不会变。
-    /// 不是公开接口:类名拆开拼,先问它认不认这个键再设;哪天系统里没了,就不糊,退回薄玻璃
-    private static func fixedBlur(_ r: CGFloat) -> UIVisualEffect? {
-        guard let cls = NSClassFromString(["_UI", "Custom", "Blur", "Effect"].joined()) as? NSObject.Type,
-              let fx = cls.init() as? UIVisualEffect,
-              fx.responds(to: NSSelectorFromString("setBlurRadius:")) else { return nil }
-        fx.setValue(r, forKey: "blurRadius")
-        if fx.responds(to: NSSelectorFromString("setScale:")) { fx.setValue(1.0, forKey: "scale") }
-        return fx
-    }
-
+    /// 0926 她:糊底要定死在她拉的数(点,跟网页小样 blur(px) 同一个数)。
+    /// 糊的那层比气泡四边各大出三倍半径,再按气泡形状剪出来:气泡边上也是整片糊,不会边上一圈发虚发暗
     private func setBlur(_ r: CGFloat) {
         guard r != blurR || (r > 0) != (blurV != nil) else { return }
         blurR = r
-        guard r > 0, let fx = Self.fixedBlur(r) else {
+        guard r > 0, LXBackdropBlurView.available else {
             blurV?.removeFromSuperview()
             blurV = nil
             return
         }
-        if let v = blurV { v.effect = fx; return }
-        let v = UIVisualEffectView(effect: fx)
-        v.frame = bounds
-        v.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-        v.isUserInteractionEnabled = false
-        v.mask = blurMask
-        insertSubview(v, belowSubview: inkV)
-        blurV = v
+        if blurV == nil {
+            let v = LXBackdropBlurView()
+            v.isUserInteractionEnabled = false
+            v.mask = blurMask
+            insertSubview(v, belowSubview: inkV)
+            blurV = v
+        }
+        blurV?.radius = r
         sig = ""
+        setNeedsLayout()
     }
 
     override func layoutSubviews() {
@@ -1403,8 +1427,13 @@ final class LXSoftGlassView: UIView {
         rimMask.path = Self.path(b.insetBy(dx: h, dy: h), tl: max(0, rr - h), tr: max(0, rr - h),
                                  bl: max(0, bl - h), br: max(0, br - h))
         layer.shadowPath = shape
-        blurMask.frame = b
-        blurMask.shape.path = shape
+        if let v = blurV {
+            let pad = ceil(blurR * 3)
+            v.frame = b.insetBy(dx: -pad, dy: -pad)
+            blurMask.frame = v.bounds
+            var shift = CGAffineTransform(translationX: pad, y: pad)
+            blurMask.shape.path = shape.copy(using: &shift)
+        }
         CATransaction.commit()
     }
 
@@ -1554,6 +1583,10 @@ final class LXBubbleSampler: UIView {
                     y += h + 14
                 }
             }
+            // 花纹上一块不剪形状的糊(半径 6):气泡里没糊时,用它分清是糊的那层不工作还是剪形状出了问题
+            let raw = LXBackdropBlurView(frame: CGRect(x: bounds.width - side - 150, y: y + 6, width: 150, height: 40))
+            raw.radius = 6
+            band.addSubview(raw)
         }
         let mark = UIView(frame: Self.beacon)
         mark.backgroundColor = UIColor(red: 1, green: 0, blue: 1, alpha: 1)
@@ -5600,15 +5633,20 @@ public class ChatListPlugin: CAPPlugin, CAPBridgedPlugin, UITableViewDataSource,
         let page = LXBubbleSampler(frame: win.bounds)
         page.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         win.addSubview(page)
-        // 0926 糊底定死验一遍:6 秒后两套 Blur 都调到 6,14 秒、22 秒各把整页摘下窗口 0.5 秒再放回
-        // (等于气泡滑出屏幕再回来)。记号旁边的小方块报第几步:蓝=调好、绿=放回一次、黄=放回两次
+        // 0926 糊底定死验一遍:6 秒两套 Blur 调到 6(蓝);26 秒、38 秒各把整页摘下窗口 0.5 秒再放回
+        // (绿、黄,等于气泡滑出屏幕再回来);46 秒调到 2(橙),看数变了糊也跟着变。
+        // 记号旁边第一个小方块报第几步;第二个:青=糊的那层系统认,红=不认
         let phase = UIView(frame: CGRect(x: 28, y: 70, width: 20, height: 20))
         page.addSubview(phase)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 6) {
-            for light in [true, false] { var k = LXSoftGlassStore.get(light); k.blur = 6; LXSoftGlassStore.set(k, light: light) }
-            phase.backgroundColor = .blue
+        let probe = UIView(frame: CGRect(x: 52, y: 70, width: 20, height: 20))
+        probe.backgroundColor = LXBackdropBlurView.available ? .cyan : .red
+        page.addSubview(probe)
+        func setAll(_ r: CGFloat) {
+            for light in [true, false] { var k = LXSoftGlassStore.get(light); k.blur = r; LXSoftGlassStore.set(k, light: light) }
         }
-        for (at, color) in [(14.0, UIColor.green), (22.0, UIColor.yellow)] {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 6) { setAll(6); phase.backgroundColor = .blue }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 46) { setAll(2); phase.backgroundColor = .orange }
+        for (at, color) in [(26.0, UIColor.green), (38.0, UIColor.yellow)] {
             DispatchQueue.main.asyncAfter(deadline: .now() + at) { [weak page] in
                 guard let p = page else { return }
                 p.removeFromSuperview()

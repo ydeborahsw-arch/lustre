@@ -80,7 +80,7 @@ jobs:
           elif [ "$LX_PREVIEW_FOCUS" = "bubbles" ]; then
             # A full-screen page of sample bubbles covers everything; the chat list is hidden underneath.
             sleep 5
-            for t in $(seq 10 5 40); do sleep 5; shot b$t; done
+            for t in $(seq 10 5 60); do sleep 5; shot b$t; done
           else
             sleep 18;  shot p01
             sleep 12;  shot p02
