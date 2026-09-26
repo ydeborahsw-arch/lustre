@@ -1866,18 +1866,21 @@ public class NativeInputPlugin: CAPPlugin, CAPBridgedPlugin, UITextViewDelegate 
     /// (WWDC25)——按主题定的话,深色主题配浅壁纸,输入框长到第三行就从浅灰跳成深灰。没设自定义壁纸照主题
     var avGlassDark: Bool { ChatListPlugin.wallLight.map { !$0 } ?? cardDark }
     /// 玻璃跟主题不同深浅时(深色主题配浅壁纸、或反过来),框里打的字和占位符换成那块玻璃配的墨:
-    /// 浅玻璃=浅壁纸上聊天字那支近黑 + 白天的占位符色;深玻璃=月夜那套。加号、语音的线和录音的 × 照主题不动(她:"能看清楚")
+    /// 浅玻璃=浅壁纸上聊天字那支近黑 + 白天的占位符色;深玻璃=月夜那套。加号、语音的线照主题(她:"能看清楚"),
+    /// 只有全月配浅壁纸那一种换深色(见下);录音的 × 不动
     func syncAvatarInk() {
         let gd = avGlassDark
         for g in [avVoiceG, avPillG, avCapG] {
             if #available(iOS 26.0, *) { g?.overrideUserInterfaceStyle = gd ? .dark : .light }
             else { g?.effect = UIBlurEffect(style: gd ? .systemThickMaterialDark : .systemThinMaterialLight) }
         }
-        let fg = cardDark ? UIColor(white: 0.82, alpha: 1) : UIColor(white: 0.32, alpha: 1)
+        let swap = avatarOn && gd != cardDark
+        // 0926 她"都行":全月配浅色壁纸时胶囊跟着变浅,浅图标几乎看不见 → 只在这时候加号、语音、录音计时换深色;
+        // 其余照主题(白天深、月夜浅)
+        let fg = cardDark && !(swap && !gd) ? UIColor(white: 0.82, alpha: 1) : UIColor(white: 0.32, alpha: 1)
         avFgC = fg
         avPlusBtn?.tintColor = fg; avRecL?.textColor = fg
         if !(avatarOn && recorder != nil) { avVoiceBtn?.tintColor = fg }
-        let swap = avatarOn && gd != cardDark
         let text: UIColor? = !swap ? themeTextC : gd ? UIColor(red: 0xE3/255, green: 0xE2/255, blue: 0xE7/255, alpha: 1)
                                                        : UIColor(red: 0x1D/255, green: 0x1D/255, blue: 0x1F/255, alpha: 1)
         let ph: UIColor? = !swap ? themePhC : gd ? UIColor(red: 0x78/255, green: 0x85/255, blue: 0x9B/255, alpha: 1)
