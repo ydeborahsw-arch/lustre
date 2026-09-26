@@ -3619,10 +3619,14 @@ final class LXFileCard: UIControl {
         if #available(iOS 26.0, *) {
             backgroundColor = .clear
             layer.borderWidth = 0
-            let g = UIVisualEffectView(effect: UIGlassEffect())
-            var w: CGFloat = 0
-            theme.bg.getWhite(&w, alpha: nil)
-            g.overrideUserInterfaceStyle = w < 0.5 ? .dark : .light
+            // 0926 她:头像模式里这张卡"太灰了"。头像模式跟气泡用同一种玻璃(.clear、不压深浅);
+            // 原来按主题底色压成深色 regular 玻璃,浅壁纸上就是一块灰
+            let g = UIVisualEffectView(effect: theme.avatars ? UIGlassEffect(style: .clear) : UIGlassEffect())
+            if !theme.avatars {
+                var w: CGFloat = 0
+                theme.bg.getWhite(&w, alpha: nil)
+                g.overrideUserInterfaceStyle = w < 0.5 ? .dark : .light
+            }
             g.cornerConfiguration = .uniformCorners(radius: .fixed(16))
             g.translatesAutoresizingMaskIntoConstraints = false
             g.isUserInteractionEnabled = false
@@ -3639,13 +3643,15 @@ final class LXFileCard: UIControl {
         let ic = UIView()
         ic.translatesAutoresizingMaskIntoConstraints = false
         ic.isUserInteractionEnabled = false
+        // 头像模式的图标底块跟字同色系淡一层(原来的 segTrack 在月夜是深灰块)
+        let tileC = theme.avatars ? textColor.withAlphaComponent(0.10) : theme.segTrack
         let back = UIView(frame: CGRect(x: 0, y: 3, width: 34, height: 38))
-        back.backgroundColor = theme.segTrack
+        back.backgroundColor = tileC
         back.alpha = 0.55
         back.layer.cornerRadius = 8
         ic.addSubview(back)
         let front = UIView(frame: CGRect(x: 6, y: 0, width: 36, height: 40))
-        front.backgroundColor = theme.segTrack
+        front.backgroundColor = tileC
         front.layer.cornerRadius = 8
         ic.addSubview(front)
         let doc = CAShapeLayer()
