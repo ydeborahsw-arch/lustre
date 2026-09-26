@@ -1505,9 +1505,10 @@ public class NativeInputPlugin: CAPPlugin, CAPBridgedPlugin, UITextViewDelegate 
         let voiceB = mkBtn(NativeInputPlugin.voiceIcon())
         let starB = mkBtn(NativeInputPlugin.starIcon())
         let plusB = mkBtn(NativeInputPlugin.ringPlusIcon())
-        // 胶囊左右各一半当点击区;图标中心离两头 21.5(半宽 41,往外挪 1)。0926 她:加号在左、星芒在右,星芒用星芒色
-        plusB.contentEdgeInsets = UIEdgeInsets(top: 0, left: 2, bottom: 0, right: 0)
-        starB.contentEdgeInsets = UIEdgeInsets(top: 0, left: 0, bottom: 0, right: 2)
+        // 胶囊左右各一半当点击区;图标中心离两头 21.5(半宽 41,往外挪 1)。
+        // 0926 她又调顺序:从左到右 [星芒][加号] 胶囊、输入框、语音圆;星芒用星芒色
+        starB.contentEdgeInsets = UIEdgeInsets(top: 0, left: 2, bottom: 0, right: 0)
+        plusB.contentEdgeInsets = UIEdgeInsets(top: 0, left: 0, bottom: 0, right: 2)
         starB.tintColor = NativeInputPlugin.starTint
         voiceB.addAction(UIAction { [weak self] _ in
             guard let s = self else { return }
@@ -1533,27 +1534,27 @@ public class NativeInputPlugin: CAPPlugin, CAPBridgedPlugin, UITextViewDelegate 
         avPillHC = pillH
         // 这些只管头像样式自己的东西,两种样式下都开着也不冲突
         NSLayoutConstraint.activate([
-            voiceG.leadingAnchor.constraint(equalTo: cardV.leadingAnchor),
+            voiceG.trailingAnchor.constraint(equalTo: cardV.trailingAnchor),
             voiceG.bottomAnchor.constraint(equalTo: cardV.bottomAnchor, constant: -3),
             voiceG.widthAnchor.constraint(equalToConstant: 40),
             voiceG.heightAnchor.constraint(equalToConstant: 40),
-            capG.trailingAnchor.constraint(equalTo: cardV.trailingAnchor),
+            capG.leadingAnchor.constraint(equalTo: cardV.leadingAnchor),
             capG.bottomAnchor.constraint(equalTo: cardV.bottomAnchor),
             capG.widthAnchor.constraint(equalToConstant: 82),
             capG.heightAnchor.constraint(equalToConstant: 46),
-            pillG.leadingAnchor.constraint(equalTo: voiceG.trailingAnchor, constant: 8),
-            pillG.trailingAnchor.constraint(equalTo: capG.leadingAnchor, constant: -8),
+            pillG.leadingAnchor.constraint(equalTo: capG.trailingAnchor, constant: 8),
+            pillG.trailingAnchor.constraint(equalTo: voiceG.leadingAnchor, constant: -8),
             pillG.bottomAnchor.constraint(equalTo: cardV.bottomAnchor, constant: -3),
             pillH,
             voiceB.leadingAnchor.constraint(equalTo: voiceG.leadingAnchor),
             voiceB.trailingAnchor.constraint(equalTo: voiceG.trailingAnchor),
             voiceB.topAnchor.constraint(equalTo: voiceG.topAnchor),
             voiceB.bottomAnchor.constraint(equalTo: voiceG.bottomAnchor),
-            starB.trailingAnchor.constraint(equalTo: capG.trailingAnchor),
+            starB.leadingAnchor.constraint(equalTo: capG.leadingAnchor),
             starB.topAnchor.constraint(equalTo: capG.topAnchor),
             starB.bottomAnchor.constraint(equalTo: capG.bottomAnchor),
             starB.widthAnchor.constraint(equalTo: capG.widthAnchor, multiplier: 0.5),
-            plusB.leadingAnchor.constraint(equalTo: capG.leadingAnchor),
+            plusB.trailingAnchor.constraint(equalTo: capG.trailingAnchor),
             plusB.topAnchor.constraint(equalTo: capG.topAnchor),
             plusB.bottomAnchor.constraint(equalTo: capG.bottomAnchor),
             plusB.widthAnchor.constraint(equalTo: capG.widthAnchor, multiplier: 0.5),
@@ -2698,8 +2699,8 @@ public class NativeInputPlugin: CAPPlugin, CAPBridgedPlugin, UITextViewDelegate 
             col.bottomAnchor.constraint(equalTo: panel.bottomAnchor, constant: -4),
             col.leadingAnchor.constraint(equalTo: panel.leadingAnchor),
             col.trailingAnchor.constraint(equalTo: panel.trailingAnchor),
-            avatarOn ? panel.leadingAnchor.constraint(equalTo: host.leadingAnchor, constant: af.minX)
-                     : panel.trailingAnchor.constraint(equalTo: host.leadingAnchor, constant: af.maxX),
+            // 两种样式的语音键都在最右,菜单右边对齐按键右边往左长
+            panel.trailingAnchor.constraint(equalTo: host.leadingAnchor, constant: af.maxX),
             panel.bottomAnchor.constraint(equalTo: host.topAnchor, constant: af.minY - 8),
         ])
         panel.transform = CGAffineTransform(translationX: 0, y: 6).scaledBy(x: 0.9, y: 0.9)

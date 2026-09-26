@@ -1263,7 +1263,7 @@ final class LXBubbleView: UIView {
 }
 
 /// 气泡的薄玻璃(玻璃拟态,0926 她在网页小样里拖出来的数):很淡的白底 + 一圈上亮下暗的细边,不糊、不投影。
-/// 底都是白 0.07;浅底(白天):亮边 1.0、粗 1pt;深底(半月/月夜):亮边 0.13、粗 0.5pt。
+/// 底都是白 0.07;浅底(白天):亮边 1.0、粗 1pt(最上面那道白 0.5,她装机后减的);深底(半月/月夜):亮边 0.13、粗 0.5pt。
 /// 亮边从上到下:rim → 45% 处 rim×0.2 → 底 浅底黑 rim×0.12 / 深底白 rim×0.08。
 /// 系统没有 2-3px 这么轻的背景模糊(最轻的 material 也是一整层磨砂),所以这里不糊。
 final class LXSoftGlassView: UIView {
@@ -1298,10 +1298,12 @@ final class LXSoftGlassView: UIView {
 
     private func applyInk() {
         let a: CGFloat = light ? 1 : 0.13
+        // 0926 她装机看了:白天最上面那道白减到 50%,往下的渐变和底下的灰边不动
+        let top: CGFloat = light ? 0.5 : a
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         fill.fillColor = UIColor(white: 1, alpha: 0.07).cgColor
-        rim.colors = [UIColor(white: 1, alpha: a).cgColor,
+        rim.colors = [UIColor(white: 1, alpha: top).cgColor,
                       UIColor(white: 1, alpha: a * 0.2).cgColor,
                       (light ? UIColor(white: 0, alpha: a * 0.12) : UIColor(white: 1, alpha: a * 0.08)).cgColor]
         rimMask.lineWidth = rimW
