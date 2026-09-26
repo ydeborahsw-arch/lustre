@@ -89,13 +89,14 @@ final class LXCardSheet: UIView {
     private var onDismiss: (() -> Void)?
 
     /// build:升起之前先把内容放进 content(这样升起的距离按装满后的高度算)
-    init(host: UIView, title: String, onDismiss: (() -> Void)? = nil, build: ((LXCardSheet) -> Void)? = nil) {
+    init(host: UIView, title: String, dim: Bool = true, onDismiss: (() -> Void)? = nil, build: ((LXCardSheet) -> Void)? = nil) {
         super.init(frame: host.bounds)
         self.onDismiss = onDismiss
         autoresizingMask = [.flexibleWidth, .flexibleHeight]
         scrim.frame = bounds
         scrim.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-        scrim.backgroundColor = UIColor(white: 0, alpha: 0.45)
+        // dim=false:不压暗(调气泡玻璃时要看清后面的气泡),点空白照样收
+        scrim.backgroundColor = UIColor(white: 0, alpha: dim ? 0.45 : 0)
         scrim.alpha = 0
         scrim.addAction(UIAction { [weak self] _ in self?.dismissSheet() }, for: .touchUpInside)
         addSubview(scrim)
@@ -744,7 +745,8 @@ final class BackgroundSync {
 
 enum ImeLine {
     static let key = "imeLineMode"
-    static let color = UIColor(red: 0.714, green: 0.839, blue: 0.910, alpha: 1)
+    /// 0926 她:光标和拼音下划线用顶栏状态字那档色,不再借星芒色
+    static var color: UIColor { NativeInputPlugin.caretTint }
     static var mode = UserDefaults.standard.integer(forKey: key)
     private(set) static var installed = false
     static var lastProbe = "(还没打过字)"
@@ -1050,7 +1052,7 @@ public class NativeInputPlugin: CAPPlugin, CAPBridgedPlugin, UITextViewDelegate 
                 t.delegate = self
                 t.backgroundColor = .clear
                 t.textColor = UIColor(red: 0xE3/255, green: 0xE2/255, blue: 0xE7/255, alpha: 1)
-                t.tintColor = UIColor(red: 0.714, green: 0.839, blue: 0.910, alpha: 1)
+                t.tintColor = NativeInputPlugin.caretTint
                 t.keyboardAppearance = .dark
                 t.textContainerInset = UIEdgeInsets(top: 9, left: 0, bottom: 9, right: 0)
                 t.textContainer.lineFragmentPadding = 0
@@ -1176,6 +1178,8 @@ public class NativeInputPlugin: CAPPlugin, CAPBridgedPlugin, UITextViewDelegate 
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
             self.cardState(LXFakeCall.make("cardState", st))
+            // 配色以当前月相的调色板为准:缓存里可能是旧版存的色(0926 月夜发送键从星芒色换成顶栏那档亮蓝)
+            if let cd = LXMoonPalette.card[RPSpec.moonState] { self.applyCardTheme(LXFakeCall.make("cardState", cd)) }
         }
     }
 
@@ -1193,7 +1197,7 @@ public class NativeInputPlugin: CAPPlugin, CAPBridgedPlugin, UITextViewDelegate 
                 t.backgroundColor = .clear
                 // 主题的 color 没到之前(全新安装还没存过主题)先用深色卡的字色,和图标、键盘的默认深色一致
                 t.textColor = UIColor(red: 0xE3/255, green: 0xE2/255, blue: 0xE7/255, alpha: 1)
-                t.tintColor = UIColor(red: 0.714, green: 0.839, blue: 0.910, alpha: 1)
+                t.tintColor = NativeInputPlugin.caretTint
                 t.keyboardAppearance = .dark
                 t.textContainer.lineFragmentPadding = 0
                 t.showsVerticalScrollIndicator = false
@@ -1474,7 +1478,7 @@ public class NativeInputPlugin: CAPPlugin, CAPBridgedPlugin, UITextViewDelegate 
     }
 
     /// 0926 头像样式的三块玻璃 + 按钮 + 录音红点/计时。只在建卡时建这一次,平时 isHidden。
-    /// 量她的参考图(402 宽)1:1:语音圆 40、药丸最矮 40 圆角 20、胶囊 82×46 圆角 23,间距 8
+    /// 量她的参考图(402 宽)1:1:语音圆 40、药丸最矮 40 圆角 20、胶囊 82 宽,间距 8;0926 她:三样都 40 高,底都抬 3
     func buildAvatarPieces(_ cardV: UIView, above tint: UIView, row: UIView, quote qb: UIView) {
         guard let send = sendBtn, let recX = recCancelBtn else { return }
         let mkGlass = { (r: CGFloat) -> UIVisualEffectView in
@@ -1492,7 +1496,7 @@ public class NativeInputPlugin: CAPPlugin, CAPBridgedPlugin, UITextViewDelegate 
             cardV.insertSubview(g, aboveSubview: tint)
             return g
         }
-        let voiceG = mkGlass(20), pillG = mkGlass(20), capG = mkGlass(23)
+        let voiceG = mkGlass(20), pillG = mkGlass(20), capG = mkGlass(20)
         let mkBtn = { (img: UIImage) -> UIButton in
             let b = UIButton(type: .system)
             b.translatesAutoresizingMaskIntoConstraints = false
@@ -1539,9 +1543,9 @@ public class NativeInputPlugin: CAPPlugin, CAPBridgedPlugin, UITextViewDelegate 
             voiceG.widthAnchor.constraint(equalToConstant: 40),
             voiceG.heightAnchor.constraint(equalToConstant: 40),
             capG.leadingAnchor.constraint(equalTo: cardV.leadingAnchor),
-            capG.bottomAnchor.constraint(equalTo: cardV.bottomAnchor),
+            capG.bottomAnchor.constraint(equalTo: cardV.bottomAnchor, constant: -3),
             capG.widthAnchor.constraint(equalToConstant: 82),
-            capG.heightAnchor.constraint(equalToConstant: 46),
+            capG.heightAnchor.constraint(equalToConstant: 40),
             pillG.leadingAnchor.constraint(equalTo: capG.trailingAnchor, constant: 8),
             pillG.trailingAnchor.constraint(equalTo: voiceG.leadingAnchor, constant: -8),
             pillG.bottomAnchor.constraint(equalTo: cardV.bottomAnchor, constant: -3),
@@ -1791,6 +1795,7 @@ public class NativeInputPlugin: CAPPlugin, CAPBridgedPlugin, UITextViewDelegate 
     }
 
     func applyCardTheme(_ call: CAPPluginCall) {
+        tv?.tintColor = NativeInputPlugin.caretTint
         if let hex = call.getString("bg"), let c = NativeInputPlugin.color(hex) {
             var a = CGFloat(call.getFloat("bgAlpha") ?? 0.55)
             if #available(iOS 26.0, *) { a = 0 }
@@ -1957,6 +1962,11 @@ public class NativeInputPlugin: CAPPlugin, CAPBridgedPlugin, UITextViewDelegate 
 
     /// 星芒色:跟聊天页页脚那颗星同一个色(白天和月夜浅蓝,半月橙)
     static var starTint: UIColor { ChatListPlugin.live?.theme.fnStar ?? LXSheetInk.star }
+    /// 光标和拼音下划线:顶栏状态字那档色(白天 #93B2D2 / 半月 #A5A198 / 月夜 #D7EAF8);0926 她:只有星芒图案用星芒色
+    static var caretTint: UIColor {
+        (LXMoonPalette.chat[RPSpec.moonState]?["pillFg"] as? String).flatMap { NativeInputPlugin.color($0) }
+            ?? UIColor(red: 0xD7 / 255, green: 0xEA / 255, blue: 0xF8 / 255, alpha: 1)
+    }
     /// 换月相时星芒色跟着换:胶囊里的星芒,录音中的语音圆和点
     func syncStarTint() {
         let c = NativeInputPlugin.starTint
@@ -2829,14 +2839,14 @@ public class NativeInputPlugin: CAPPlugin, CAPBridgedPlugin, UITextViewDelegate 
         guard let t = tv, let hC = cardHeightC else { return }
         if avatarOn, let pillHC = avPillHC {
             // 头像样式:药丸 = 托盘(附件条/引用条)+ 字,一行时字在 40 里上下正中;
-            // 卡片 = max(46, 药丸 + 3),最高还是 cardMaxH,再多就在框里滚
+            // 卡片 = max(43, 药丸 + 3)(三样都 40 高、底抬 3,卡顶就是三样的顶),最高还是 cardMaxH,再多就在框里滚
             let chain = 6 + (attsHC?.constant ?? 0) + (quoteTopC?.constant ?? 0) + (quoteHC?.constant ?? 0)
             let tray: CGFloat = (attsCount > 0 || quoteIsOn) ? chain + 5 : 0
             let content = t.contentSize.height
             let pad = max(0, (40 - content) / 2)
             let pill = min(cardMaxH - 3, max(40, tray + content + pad * 2))
             let sets: [(NSLayoutConstraint?, CGFloat)] = [
-                (tvTopC, tray + pad - chain), (avTvBotC, -pad), (pillHC, pill), (hC, max(46, pill + 3))]
+                (tvTopC, tray + pad - chain), (avTvBotC, -pad), (pillHC, pill), (hC, max(43, pill + 3))]
             var moved = false
             for (c, v) in sets {
                 if let c, abs(c.constant - v) > 0.5 { c.constant = v; moved = true }

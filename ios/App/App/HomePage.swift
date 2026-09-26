@@ -2758,6 +2758,7 @@ final class RPanelView: UIView {
         ("chatAvatarsRow", "Message avatars"),
         ("avatarMenu", "Change avatar"),
         ("wallMenu", "Chat background"),
+        ("bubbleGlassRow", "Bubble glass"),
     ]
     var actionRows: [RPActionRow] = []
 
@@ -2782,6 +2783,10 @@ final class RPanelView: UIView {
         c.strokePath()
         c.move(to: CGPoint(x: 15.5, y: 6)); c.addLine(to: CGPoint(x: 15.5, y: 10))
         c.move(to: CGPoint(x: 13.5, y: 8)); c.addLine(to: CGPoint(x: 17.5, y: 8))
+        c.strokePath()
+    }
+    static let iBubble = glyph { c, _ in
+        c.addPath(UIBezierPath(roundedRect: CGRect(x: 2.5, y: 4.5, width: 14, height: 10), cornerRadius: 5).cgPath)
         c.strokePath()
     }
     static let iWall = glyph { c, _ in
@@ -2954,10 +2959,10 @@ final class RPanelView: UIView {
         let inner = UIStackView()
         inner.translatesAutoresizingMaskIntoConstraints = false
         inner.axis = .vertical
-        let icons: [UIImage] = [Self.iPerson, Self.iPersonPlus, Self.iWall]
+        let icons: [UIImage] = [Self.iPerson, Self.iPersonPlus, Self.iWall, Self.iBubble]
         for (i, (wid, name)) in rowsById.enumerated() {
             let row = RPActionRow(icon: icons[i], name: name)
-            row.valL.text = wid == "chatAvatarsRow" ? "Off" : "Default"
+            row.valL.text = wid == "chatAvatarsRow" ? "Off" : wid == "bubbleGlassRow" ? "" : "Default"
             func item(_ title: String, _ sf: String, _ act: String) -> UIAction {
                 UIAction(title: title, image: UIImage(systemName: sf)) { [weak self] _ in self?.onAct?(act) }
             }

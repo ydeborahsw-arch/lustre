@@ -1262,18 +1262,53 @@ final class LXBubbleView: UIView {
     }
 }
 
-/// 气泡的薄玻璃(玻璃拟态,0926 她在网页小样里拖出来的数):很淡的白底 + 一圈上亮下暗的细边,不糊、不投影。
-/// 底都是白 0.07;浅底(白天):亮边 1.0、粗 1pt(最上面那道白 0.5,她装机后减的);深底(半月/月夜):亮边 0.13、粗 0.5pt。
-/// 亮边从上到下:rim → 45% 处 rim×0.2 → 底 浅底黑 rim×0.12 / 深底白 rim×0.08。
-/// 系统没有 2-3px 这么轻的背景模糊(最轻的 material 也是一整层磨砂),所以这里不糊。
+/// 气泡薄玻璃的数:白天一套、夜里一套,存本机。默认=她 0926 在网页小样里调的(白天最上面那道白后来减到 0.5)
+enum LXSoftGlassStore {
+    struct Ink { var fill: CGFloat; var top: CGFloat; var rim: CGFloat; var width: CGFloat; var shadow: CGFloat; var blur: CGFloat }
+    static let changed = Notification.Name("lx.softGlass.changed")
+    /// 糊的滑杆值按 UIBlurEffect(.regular) 整块磨砂约 30 来折成比例;是相对的档,不是真 px
+    static let blurFull: CGFloat = 30
+    static func defaults(_ light: Bool) -> Ink {
+        light ? Ink(fill: 0.07, top: 0.5, rim: 1, width: 1, shadow: 0, blur: 0)
+              : Ink(fill: 0.07, top: 0.13, rim: 0.13, width: 0.5, shadow: 0, blur: 0)
+    }
+    private static func key(_ light: Bool) -> String { light ? "lx.softGlass.day" : "lx.softGlass.night" }
+    static func get(_ light: Bool) -> Ink {
+        let d = defaults(light)
+        guard let m = UserDefaults.standard.dictionary(forKey: key(light)) else { return d }
+        func v(_ k: String, _ x: CGFloat) -> CGFloat { (m[k] as? NSNumber).map { CGFloat($0.doubleValue) } ?? x }
+        return Ink(fill: v("fill", d.fill), top: v("top", d.top), rim: v("rim", d.rim),
+                   width: v("width", d.width), shadow: v("shadow", d.shadow), blur: v("blur", d.blur))
+    }
+    static func set(_ i: Ink, light: Bool) {
+        let m: [String: Double] = ["fill": Double(i.fill), "top": Double(i.top), "rim": Double(i.rim),
+                                   "width": Double(i.width), "shadow": Double(i.shadow), "blur": Double(i.blur)]
+        UserDefaults.standard.set(m, forKey: key(light))
+        NotificationCenter.default.post(name: changed, object: nil)
+    }
+    static func reset(_ light: Bool) {
+        UserDefaults.standard.removeObject(forKey: key(light))
+        NotificationCenter.default.post(name: changed, object: nil)
+    }
+}
+
+/// 气泡的薄玻璃(玻璃拟态):很淡的白底 + 一圈上亮下暗的细边,可选轻糊和阴影;数从 LXSoftGlassStore 取,她在右面板 Bubble glass 里自己调。
+/// 亮边从上到下:top → 45% 处 rim×0.2 → 底 浅底黑 rim×0.12 / 深底白 rim×0.08。
+/// 糊:系统没有 2-3pt 这么轻的背景模糊,这里让 UIBlurEffect 的动画停在半路取一小段(偏方,苹果不保证);值为 0 就不建这一层
 final class LXSoftGlassView: UIView {
     var light = true { didSet { if light != oldValue { applyInk() } } }
     var maxRadius: CGFloat = 18 { didSet { if maxRadius != oldValue { setNeedsLayout() } } }
     var tailCorner = false { didSet { if tailCorner != oldValue { setNeedsLayout() } } }
     var tailLeft = false { didSet { if tailLeft != oldValue { setNeedsLayout() } } }
+    private let inkV = UIView()
     private let fill = CAShapeLayer()
     private let rim = CAGradientLayer()
     private let rimMask = CAShapeLayer()
+    private var rimW: CGFloat = 1
+    private var blurV: UIVisualEffectView?
+    private var blurAnim: UIViewPropertyAnimator?
+    private var blurFrac: CGFloat = 0
+    private let blurMask = LXPathMaskView()
     private var sig = ""
 
     /// 字是深色=底是浅的
@@ -1282,34 +1317,79 @@ final class LXSoftGlassView: UIView {
     override init(frame: CGRect) {
         super.init(frame: frame)
         backgroundColor = .clear
-        layer.addSublayer(fill)
+        inkV.frame = bounds
+        inkV.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        inkV.isUserInteractionEnabled = false
+        addSubview(inkV)
+        inkV.layer.addSublayer(fill)
         rim.startPoint = CGPoint(x: 0.5, y: 0)
         rim.endPoint = CGPoint(x: 0.5, y: 1)
         rim.locations = [0, 0.45, 1]
         rimMask.fillColor = UIColor.clear.cgColor
         rimMask.strokeColor = UIColor.black.cgColor
         rim.mask = rimMask
-        layer.addSublayer(rim)
+        inkV.layer.addSublayer(rim)
+        layer.shadowOffset = CGSize(width: 0, height: 4)
+        layer.shadowRadius = 7
+        NotificationCenter.default.addObserver(self, selector: #selector(inkChanged), name: LXSoftGlassStore.changed, object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(backToFront),
+                                               name: UIApplication.willEnterForegroundNotification, object: nil)
         applyInk()
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+    deinit { blurAnim?.stopAnimation(true) }
 
-    private var rimW: CGFloat { light ? 1 : 0.5 }
+    @objc private func inkChanged() { applyInk() }
+    /// 从后台回来,停在半路的模糊动画可能被系统收尾成整块磨砂;按原来的量重新停一次
+    @objc private func backToFront() { if blurFrac > 0 { setBlur(blurFrac, force: true) } }
 
     private func applyInk() {
-        let a: CGFloat = light ? 1 : 0.13
-        // 0926 她装机看了:白天最上面那道白减到 50%,往下的渐变和底下的灰边不动
-        let top: CGFloat = light ? 0.5 : a
+        let k = LXSoftGlassStore.get(light)
+        rimW = k.width
         CATransaction.begin()
         CATransaction.setDisableActions(true)
-        fill.fillColor = UIColor(white: 1, alpha: 0.07).cgColor
-        rim.colors = [UIColor(white: 1, alpha: top).cgColor,
-                      UIColor(white: 1, alpha: a * 0.2).cgColor,
-                      (light ? UIColor(white: 0, alpha: a * 0.12) : UIColor(white: 1, alpha: a * 0.08)).cgColor]
-        rimMask.lineWidth = rimW
+        fill.fillColor = UIColor(white: 1, alpha: k.fill).cgColor
+        rim.colors = [UIColor(white: 1, alpha: k.top).cgColor,
+                      UIColor(white: 1, alpha: k.rim * 0.2).cgColor,
+                      (light ? UIColor(white: 0, alpha: k.rim * 0.12) : UIColor(white: 1, alpha: k.rim * 0.08)).cgColor]
+        rimMask.lineWidth = k.width
+        layer.shadowColor = (light ? UIColor(red: 20 / 255, green: 30 / 255, blue: 40 / 255, alpha: 1) : UIColor.black).cgColor
+        layer.shadowOpacity = Float(k.shadow)
         CATransaction.commit()
+        blurV?.overrideUserInterfaceStyle = light ? .light : .dark
+        setBlur(k.blur / LXSoftGlassStore.blurFull, force: false)
         sig = ""
         setNeedsLayout()
+    }
+
+    private func setBlur(_ amount: CGFloat, force: Bool) {
+        let f = max(0, min(1, amount))
+        guard force || abs(f - blurFrac) > 0.0005 || (f > 0) != (blurV != nil) else { return }
+        blurFrac = f
+        blurAnim?.stopAnimation(true)
+        blurAnim = nil
+        guard f > 0 else {
+            blurV?.removeFromSuperview()
+            blurV = nil
+            return
+        }
+        let v: UIVisualEffectView
+        if let b = blurV { v = b } else {
+            v = UIVisualEffectView(effect: nil)
+            v.frame = bounds
+            v.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+            v.isUserInteractionEnabled = false
+            v.mask = blurMask
+            insertSubview(v, belowSubview: inkV)
+            blurV = v
+            sig = ""
+        }
+        v.overrideUserInterfaceStyle = light ? .light : .dark
+        v.effect = nil
+        let a = UIViewPropertyAnimator(duration: 1, curve: .linear) { [weak v] in v?.effect = UIBlurEffect(style: .regular) }
+        a.pausesOnCompletion = true
+        a.fractionComplete = f
+        blurAnim = a
     }
 
     override func layoutSubviews() {
@@ -1317,18 +1397,22 @@ final class LXSoftGlassView: UIView {
         let b = bounds
         let rr = min(maxRadius, b.height / 2)
         let tr = tailCorner ? min(3, rr) : rr
-        let s = "\(b.width):\(b.height):\(rr):\(tr):\(tailLeft):\(light)"
+        let s = "\(b.width):\(b.height):\(rr):\(tr):\(tailLeft):\(rimW)"
         guard s != sig else { return }
         sig = s
         let bl = tailLeft ? tr : rr, br = tailLeft ? rr : tr
         let h = rimW / 2
+        let shape = Self.path(b, tl: rr, tr: rr, bl: bl, br: br)
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         fill.frame = b; rim.frame = b; rimMask.frame = b
-        fill.path = Self.path(b, tl: rr, tr: rr, bl: bl, br: br)
+        fill.path = shape
         // 细边画在气泡里面:路径往里收半个线宽,外沿正好贴气泡边
         rimMask.path = Self.path(b.insetBy(dx: h, dy: h), tl: max(0, rr - h), tr: max(0, rr - h),
                                  bl: max(0, bl - h), br: max(0, br - h))
+        layer.shadowPath = shape
+        blurMask.frame = b
+        blurMask.shape.path = shape
         CATransaction.commit()
     }
 
@@ -1345,6 +1429,77 @@ final class LXSoftGlassView: UIView {
         p.addArc(withCenter: CGPoint(x: r.minX + tl, y: r.minY + tl), radius: tl, startAngle: .pi, endAngle: -.pi / 2, clockwise: true)
         p.close()
         return p.cgPath
+    }
+}
+
+/// 形状遮罩视图:UIVisualEffectView 只认 mask 视图,不认 layer.mask
+final class LXPathMaskView: UIView {
+    override class var layerClass: AnyClass { CAShapeLayer.self }
+    var shape: CAShapeLayer { layer as! CAShapeLayer }
+}
+
+/// 右面板 Bubble glass 升起的调节卡:六根滑杆,拖的时候气泡当场变;调的是现在显示的那套(字深=白天那套)
+enum LXSoftGlassTuner {
+    static func build(into sheet: LXCardSheet, light: Bool) {
+        var ink = LXSoftGlassStore.get(light)
+        var rows: [(UISlider, UILabel, WritableKeyPath<LXSoftGlassStore.Ink, CGFloat>, (CGFloat) -> String)] = []
+        let hint = UILabel()
+        hint.text = light ? "Day set · changes show as you drag" : "Night set · changes show as you drag"
+        hint.font = LXCardSheet.anthro(13)
+        hint.textColor = LXSheetInk.soft
+        sheet.content.addArrangedSubview(hint)
+        func add(_ name: String, _ kp: WritableKeyPath<LXSoftGlassStore.Ink, CGFloat>, _ lo: Float, _ hi: Float, _ step: Float,
+                 _ fmt: @escaping (CGFloat) -> String) {
+            let nameL = UILabel()
+            nameL.text = name
+            nameL.font = LXCardSheet.anthro(15)
+            nameL.textColor = LXSheetInk.text
+            nameL.widthAnchor.constraint(equalToConstant: 108).isActive = true
+            let valL = UILabel()
+            valL.font = .monospacedDigitSystemFont(ofSize: 14, weight: .regular)
+            valL.textColor = LXSheetInk.soft
+            valL.textAlignment = .right
+            valL.widthAnchor.constraint(equalToConstant: 52).isActive = true
+            valL.text = fmt(ink[keyPath: kp])
+            let s = UISlider()
+            s.minimumValue = lo
+            s.maximumValue = hi
+            s.value = Float(ink[keyPath: kp])
+            s.minimumTrackTintColor = NativeInputPlugin.caretTint
+            s.addAction(UIAction { a in
+                guard let sl = a.sender as? UISlider else { return }
+                let v = CGFloat((sl.value / step).rounded() * step)
+                ink[keyPath: kp] = v
+                valL.text = fmt(v)
+                LXSoftGlassStore.set(ink, light: light)
+            }, for: .valueChanged)
+            let row = UIStackView(arrangedSubviews: [nameL, s, valL])
+            row.axis = .horizontal
+            row.spacing = 10
+            row.alignment = .center
+            sheet.content.addArrangedSubview(row)
+            rows.append((s, valL, kp, fmt))
+        }
+        let two = { (v: CGFloat) -> String in String(format: "%.2f", Double(v)) }
+        add("Fill", \.fill, 0, 0.4, 0.01, two)
+        add("Rim", \.rim, 0, 1, 0.01, two)
+        add("Top highlight", \.top, 0, 1, 0.01, two)
+        add("Rim width", \.width, 0.5, 2, 0.25, { String(format: "%gpt", Double($0)) })
+        add("Shadow", \.shadow, 0, 0.6, 0.01, two)
+        add("Blur", \.blur, 0, 10, 0.5, { String(format: "%.1f", Double($0)) })
+        let reset = UIButton(type: .system)
+        reset.setTitle("Reset to default", for: .normal)
+        reset.titleLabel?.font = LXCardSheet.anthro(15)
+        reset.tintColor = LXSheetInk.soft
+        reset.addAction(UIAction { _ in
+            LXSoftGlassStore.reset(light)
+            ink = LXSoftGlassStore.defaults(light)
+            for (s, valL, kp, fmt) in rows {
+                s.value = Float(ink[keyPath: kp])
+                valL.text = fmt(ink[keyPath: kp])
+            }
+        }, for: .touchUpInside)
+        sheet.content.addArrangedSubview(reset)
     }
 }
 
@@ -1452,7 +1607,7 @@ enum LXMoonPalette {
     static let card: [String: [String: Any]] = [
         "day": ["bg": "#fafcfe", "bgAlpha": 0.86, "border": "#ffffff", "borderAlpha": 0.95, "sendBg": "#C8D8E8", "sendFg": "#2A3A4D", "color": "#2A3A4D", "kbDark": false, "phColor": "#92a6b8", "modelFg": "#2a3a4d", "effortFg": "#64798d", "accent": "#618FBD", "quoteBg": "#fafcfe", "quoteBgA": 0.92, "quoteLine": "#9eafbc", "quoteLineA": 0.16, "textSoft": "#64798D", "textFaint": "#92A6B8"],
         "half": ["bg": "#242422", "bgAlpha": 0.55, "border": "#ffffff", "borderAlpha": 0.1, "sendBg": "#E9E5DC", "sendFg": "#191917", "color": "#E9E5DC", "kbDark": true, "phColor": "#6e6b64", "modelFg": "#e9e5dc", "effortFg": "#a5a198", "accent": "#DA7A55", "quoteBg": "#222220", "quoteBgA": 0.94, "quoteLine": "#ffffff", "quoteLineA": 0.08, "textSoft": "#A5A198", "textFaint": "#6E6B64"],
-        "moon": ["bg": "#121212", "bgAlpha": 0.55, "border": "#ffffff", "borderAlpha": 0.1, "sendBg": "#B6D6E8", "sendFg": "#05070B", "color": "#E3E2E7", "kbDark": true, "phColor": "#78859b", "modelFg": "#ffffff", "effortFg": "#78859b", "accent": "#A9D9EE", "quoteBg": "#121212", "quoteBgA": 1, "quoteLine": "#dfe3ee", "quoteLineA": 0.1, "textSoft": "#A5B0C6", "textFaint": "#717E97"],
+        "moon": ["bg": "#121212", "bgAlpha": 0.55, "border": "#ffffff", "borderAlpha": 0.1, "sendBg": "#D7EAF8", "sendFg": "#05070B", "color": "#E3E2E7", "kbDark": true, "phColor": "#78859b", "modelFg": "#ffffff", "effortFg": "#78859b", "accent": "#A9D9EE", "quoteBg": "#121212", "quoteBgA": 1, "quoteLine": "#dfe3ee", "quoteLineA": 0.1, "textSoft": "#A5B0C6", "textFaint": "#717E97"],
     ]
     static func persist(_ m: String) {
         guard let c = chat[m] else { return }
@@ -4359,6 +4514,7 @@ public class ChatListPlugin: CAPPlugin, CAPBridgedPlugin, UITableViewDataSource,
             case "customWallReset": s.rpResetWall()
             case "customResetRow": s.rpResetLooks()
             case "chatAvatarsRow" where LustreConfig.webless: s.rpToggleAvatars()
+            case "bubbleGlassRow": s.openBubbleTuner()
             default:
                 s.webAct(["act": "rpClick", "id": act])
             }
@@ -4487,6 +4643,16 @@ public class ChatListPlugin: CAPPlugin, CAPBridgedPlugin, UITableViewDataSource,
             let rowId = ["ai": "customAvatarAiRow", "human": "customAvatarHumanRow",
                          "zhao": "customAvatarZhaoRow", "wall": "customWallRow"][target]
             if let rid = rowId { s.rpSetVal(rid, "Custom") }
+        }
+    }
+
+    /// 0926 她:"把气泡参数整个搬到原生界面,我自己调"。先收右面板让出聊天页,再升起调节卡(不压暗,边拖边看)
+    func openBubbleTuner() {
+        closeRPanel()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self] in
+            guard let s = self, let host = s.bridge?.viewController?.view else { return }
+            let light = LXSoftGlassView.onLight(s.theme.meFg)
+            _ = LXCardSheet(host: host, title: "Bubble glass", dim: false, build: { LXSoftGlassTuner.build(into: $0, light: light) })
         }
     }
 
