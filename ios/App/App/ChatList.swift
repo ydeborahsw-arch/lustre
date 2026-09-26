@@ -3680,22 +3680,16 @@ final class LXHeaderBar: UIView {
         guard glassed else { return }
         var w: CGFloat = 1
         t.bg.getWhite(&w, alpha: nil)
-        let themeDark = w < 0.5
-        let dark = ChatListPlugin.wallLight.map { !$0 } ?? themeDark
-        for g in glassVs { g.overrideUserInterfaceStyle = dark ? .dark : .light }
-        guard dark != themeDark, let pal = LXMoonPalette.chat[dark ? "moon" : "day"] else {
-            inkOverride = nil
-            for b in [menuBtn, moreBtn] { b.tintColor = t.hdrBtnFg }
-            statusL.textColor = t.pillFg
-            for d in dotLayers { d.backgroundColor = t.pillFg.cgColor }
-            return
+        // 0926 她:玻璃深浅跟主题走,不看壁纸;小块自己按背后翻深浅的那点,靠 LXThemeGlass 压的主题色稳住
+        let dark = w < 0.5
+        for g in glassVs {
+            g.overrideUserInterfaceStyle = dark ? .dark : .light
+            if let v = g as? UIVisualEffectView { LXThemeGlass.apply(v) }
         }
-        let fg = (pal["hdrBtnFg"] as? String).flatMap { NativeInputPlugin.color($0) } ?? t.hdrBtnFg
-        let sf = (pal["pillFg"] as? String).flatMap { NativeInputPlugin.color($0) } ?? t.pillFg
-        inkOverride = sf
-        for b in [menuBtn, moreBtn] { b.tintColor = fg }
-        statusL.textColor = sf
-        for d in dotLayers { d.backgroundColor = sf.cgColor }
+        inkOverride = nil
+        for b in [menuBtn, moreBtn] { b.tintColor = t.hdrBtnFg }
+        statusL.textColor = t.pillFg
+        for d in dotLayers { d.backgroundColor = t.pillFg.cgColor }
     }
 }
 
@@ -5816,6 +5810,49 @@ public class ChatListPlugin: CAPPlugin, CAPBridgedPlugin, UITableViewDataSource,
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 105) {
             NativeInputPlugin.live?.previewComposer(text: "Preview\nSecond line\nThird line")
+        }
+        // 0926 她要系统玻璃跟主题走:压的那层主题色试三档厚度,框里打出档位(25/45/65)好认;上面 85–115 秒是 45。
+        // 月夜配浅壁纸 → 月夜配中间亮、左下深的壁纸 → 白天配深壁纸
+        let size = container?.bounds.size ?? CGSize(width: 402, height: 874)
+        let steps: [(Double, String, UIImage, CGFloat)] = [
+            (118, "moon", Self.previewLightWall(size), 0.25), (128, "moon", Self.previewLightWall(size), 0.65),
+            (138, "moon", Self.previewMixedWall(size), 0.25), (148, "moon", Self.previewMixedWall(size), 0.45),
+            (158, "moon", Self.previewMixedWall(size), 0.65),
+            (168, "day", Self.previewDarkWall(size), 0.25), (178, "day", Self.previewDarkWall(size), 0.45),
+            (188, "day", Self.previewDarkWall(size), 0.65),
+        ]
+        for (at, moon, wall, a) in steps {
+            DispatchQueue.main.asyncAfter(deadline: .now() + at) { [weak self] in
+                guard let s = self else { return }
+                LXThemeGlass.previewAlpha = a
+                LXWallStore.image = wall
+                if RPSpec.moonState != moon { s.switchMoon(moon) }
+                s.applyWall()
+                NativeInputPlugin.live?.previewComposer(text: "\(Int(a * 100))")
+            }
+        }
+    }
+
+    /// 中间亮、左下角一块深(照她 0926 那张:整体偏亮,底下左边是深色的楼)
+    private static func previewMixedWall(_ size: CGSize) -> UIImage {
+        let light = previewLightWall(size)
+        return UIGraphicsImageRenderer(size: size).image { ctx in
+            light.draw(at: .zero)
+            UIColor(red: 0.16, green: 0.18, blue: 0.22, alpha: 1).setFill()
+            ctx.fill(CGRect(x: 0, y: size.height * 0.78, width: size.width * 0.45, height: size.height * 0.22))
+        }
+    }
+
+    private static func previewDarkWall(_ size: CGSize) -> UIImage {
+        UIGraphicsImageRenderer(size: size).image { ctx in
+            UIColor(red: 0.10, green: 0.11, blue: 0.13, alpha: 1).setFill()
+            ctx.fill(CGRect(origin: .zero, size: size))
+            let p = UIBezierPath()
+            var x = -size.height
+            while x < size.width { p.move(to: CGPoint(x: x, y: size.height)); p.addLine(to: CGPoint(x: x + size.height, y: 0)); x += 18 }
+            UIColor(red: 0.20, green: 0.22, blue: 0.26, alpha: 1).setStroke()
+            p.lineWidth = 2
+            p.stroke()
         }
     }
 

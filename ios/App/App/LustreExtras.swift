@@ -747,6 +747,30 @@ final class BackgroundSync {
     }
 }
 
+/// 0926 她:"我想要系统玻璃",但深浅要跟主题。系统液态玻璃的小块会按背后自己翻深浅(大块只认设定),
+/// 在玻璃上压一层主题色把它稳住:月夜压深、半月压暖深、白天压白。输入栏三块和顶栏三颗共用
+enum LXThemeGlass {
+    /// 预览里轮换几档厚度给她挑;装机包里恒为 nil
+    static var previewAlpha: CGFloat?
+    static var alpha: CGFloat { previewAlpha ?? 0.45 }
+    static var tint: UIColor {
+        switch RPSpec.moonState {
+        case "day": return UIColor(white: 1, alpha: alpha)
+        case "half": return UIColor(red: 0x19/255, green: 0x19/255, blue: 0x17/255, alpha: alpha)
+        default: return UIColor(red: 0.043, green: 0.043, blue: 0.047, alpha: alpha)
+        }
+    }
+    /// 颜色没变就不动,免得每次同步都把玻璃重新挂一遍
+    static func apply(_ v: UIVisualEffectView) {
+        guard #available(iOS 26.0, *) else { return }
+        let want = tint
+        if let e = v.effect as? UIGlassEffect, e.tintColor?.isEqual(want) == true { return }
+        let e = UIGlassEffect(style: .regular)
+        e.tintColor = want
+        UIView.performWithoutAnimation { v.effect = e }
+    }
+}
+
 enum ImeLine {
     static let key = "imeLineMode"
     /// 0926 她:光标和拼音下划线用顶栏状态字那档色,不再借星芒色
@@ -1910,31 +1934,26 @@ public class NativeInputPlugin: CAPPlugin, CAPBridgedPlugin, UITextViewDelegate 
         syncAvatarInk()
     }
 
-    /// 0926 她选 A:头像样式三块玻璃的深浅按壁纸定,不按主题。液态玻璃小块会自己跟着背后翻深浅,大块不翻、只认这里的设定
-    /// (WWDC25)——按主题定的话,深色主题配浅壁纸,输入框长到第三行就从浅灰跳成深灰。没设自定义壁纸照主题
-    var avGlassDark: Bool { ChatListPlugin.wallLight.map { !$0 } ?? cardDark }
-    /// 玻璃跟主题不同深浅时(深色主题配浅壁纸、或反过来),框里打的字和占位符换成那块玻璃配的墨:
-    /// 浅玻璃=浅壁纸上聊天字那支近黑 + 白天的占位符色;深玻璃=月夜那套。加号、语音的线照主题(她:"能看清楚"),
-    /// 只有全月配浅壁纸那一种换深色(见下);录音的 × 不动
+    /// 0926 她:"为什么变来变去,而不是根据主题的颜色来""我想要系统玻璃"——头像样式三块玻璃的深浅跟主题走,
+    /// 不再看壁纸;小块会按背后自己翻深浅,靠 LXThemeGlass 压的那层主题色稳住
+    var avGlassDark: Bool { cardDark }
+    /// 框里的字、占位符、加号、语音的线、录音计时都照主题(白天深、月夜浅);录音的 × 不动
     func syncAvatarInk() {
         let gd = avGlassDark
         for g in [avVoiceG, avPillG, avCapG] {
-            if #available(iOS 26.0, *) { g?.overrideUserInterfaceStyle = gd ? .dark : .light }
-            else { g?.effect = UIBlurEffect(style: gd ? .systemThickMaterialDark : .systemThinMaterialLight) }
+            if #available(iOS 26.0, *) {
+                g?.overrideUserInterfaceStyle = gd ? .dark : .light
+                if let v = g { LXThemeGlass.apply(v) }
+            } else {
+                g?.effect = UIBlurEffect(style: gd ? .systemThickMaterialDark : .systemThinMaterialLight)
+            }
         }
-        let swap = avatarOn && gd != cardDark
-        // 0926 她"都行":全月配浅色壁纸时胶囊跟着变浅,浅图标几乎看不见 → 只在这时候加号、语音、录音计时换深色;
-        // 其余照主题(白天深、月夜浅)
-        let fg = cardDark && !(swap && !gd) ? UIColor(white: 0.82, alpha: 1) : UIColor(white: 0.32, alpha: 1)
+        let fg = gd ? UIColor(white: 0.82, alpha: 1) : UIColor(white: 0.32, alpha: 1)
         avFgC = fg
         avPlusBtn?.tintColor = fg; avRecL?.textColor = fg
         if !(avatarOn && recorder != nil) { avVoiceBtn?.tintColor = fg }
-        let text: UIColor? = !swap ? themeTextC : gd ? UIColor(red: 0xE3/255, green: 0xE2/255, blue: 0xE7/255, alpha: 1)
-                                                       : UIColor(red: 0x1D/255, green: 0x1D/255, blue: 0x1F/255, alpha: 1)
-        let ph: UIColor? = !swap ? themePhC : gd ? UIColor(red: 0x78/255, green: 0x85/255, blue: 0x9B/255, alpha: 1)
-                                                   : UIColor(red: 0x9A/255, green: 0x9A/255, blue: 0xA0/255, alpha: 1)
-        if let c = text { tv?.textColor = c }
-        if let c = ph { phLabel?.textColor = c }
+        if let c = themeTextC { tv?.textColor = c }
+        if let c = themePhC { phLabel?.textColor = c }
     }
 
     func micDeniedToast() {
