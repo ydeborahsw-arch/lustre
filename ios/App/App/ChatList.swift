@@ -1729,7 +1729,11 @@ enum LXWallStore {
     static func loadDisk() {
         guard !loaded else { return }
         loaded = true
-        if let u = fileURL, let d = try? Data(contentsOf: u), let img = UIImage(data: d) { image = img }
+        if let u = fileURL, let d = try? Data(contentsOf: u), let img = UIImage(data: d) {
+            image = img
+            // 0926 她:恢复默认壁纸没反应。开机从盘里读回来的壁纸没有来源串,记个占位,不然恢复默认(空串)会被当成没变直接跳过
+            lastSrc = "disk"
+        }
     }
     static func set(source: String) {
         if source == lastSrc { return }
