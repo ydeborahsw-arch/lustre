@@ -528,6 +528,7 @@ final class LXChatData {
     private func injectPreviewShowcase() {
         DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
             if LustreConfig.previewFocus == "composer" { ChatListPlugin.live?.previewComposerTour() }
+            else if LustreConfig.previewFocus == "bubbles" { ChatListPlugin.live?.previewBubbleSampler() }
             else { ChatListPlugin.live?.previewAvaTimeCheck() }
         }
         let base = (msgs.last?.id ?? 0) + 1000
@@ -1199,20 +1200,18 @@ final class LXBubbleView: UIView {
     var tailLeft = false { didSet { setNeedsLayout() } }
     /// 多行气泡的圆角上限(单行永远是胶囊);头像模式字小了,圆角跟着同比收
     var maxRadius: CGFloat = 18 { didSet { if maxRadius != oldValue { setNeedsLayout() } } }
-    private var cornerSig = ""
     private let shapeMask = CAShapeLayer()
-    private var glassV: UIVisualEffectView?
-    private var glassTint: UIColor?
-    private let glassMaskV = LXShapeMaskView()
-    func setGlass(_ on: Bool, tint: UIColor) {
+    private var softV: LXSoftGlassView?
+    /// light:气泡底下是浅色(白天,或浅色壁纸)。玻璃只建一次,换主题只换颜色
+    func setGlass(_ on: Bool, light: Bool) {
         guard on else {
-            glassV?.removeFromSuperview(); glassV = nil; glassTint = nil; cornerSig = ""
+            softV?.removeFromSuperview(); softV = nil
             setNeedsLayout()
             return
         }
-        let v: UIVisualEffectView
-        if let g = glassV { v = g } else {
-            v = UIVisualEffectView(effect: nil)
+        let v: LXSoftGlassView
+        if let g = softV { v = g } else {
+            v = LXSoftGlassView()
             v.isUserInteractionEnabled = false
             v.translatesAutoresizingMaskIntoConstraints = false
             insertSubview(v, at: 0)
@@ -1222,22 +1221,9 @@ final class LXBubbleView: UIView {
                 v.leadingAnchor.constraint(equalTo: leadingAnchor),
                 v.trailingAnchor.constraint(equalTo: trailingAnchor),
             ])
-            glassV = v; cornerSig = ""
+            softV = v
         }
-        if #available(iOS 26.0, *), v.effect is UIGlassEffect { return }
-        if let t = glassTint, t.isEqual(tint) { return }
-        glassTint = tint
-        UIView.performWithoutAnimation {
-            if #available(iOS 26.0, *) {
-                let e = UIGlassEffect(style: .clear)
-                e.isInteractive = false
-                v.effect = e
-                v.contentView.backgroundColor = .clear
-            } else {
-                v.effect = UIBlurEffect(style: .systemUltraThinMaterial)
-                v.contentView.backgroundColor = tint.withAlphaComponent(0.5)
-            }
-        }
+        v.light = light
         setNeedsLayout()
     }
     private func path(_ b: CGRect, _ rr: CGFloat) -> UIBezierPath {
@@ -1260,32 +1246,10 @@ final class LXBubbleView: UIView {
         let rr = min(maxRadius, bounds.height / 2)
         CATransaction.begin()
         CATransaction.setDisableActions(true)
-        if let g = glassV {
+        if let g = softV {
             layer.mask = nil
             layer.cornerRadius = 0
-            if #available(iOS 26.0, *) {
-                if g.mask != nil { g.mask = nil }
-                g.clipsToBounds = true
-                let tr = tailCorner ? min(3, rr) : rr
-                let sig = "\(rr):\(tr):\(tailLeft)"
-                if sig != cornerSig {
-                    cornerSig = sig
-                    g.cornerConfiguration = .corners(topLeftRadius: .fixed(rr), topRightRadius: .fixed(rr),
-                                                     bottomLeftRadius: .fixed(tailLeft ? tr : rr),
-                                                     bottomRightRadius: .fixed(tailLeft ? rr : tr))
-                }
-            } else if tailCorner && !tailLeft {
-                g.layer.cornerRadius = 0
-                g.clipsToBounds = false
-                glassMaskV.frame = g.bounds
-                glassMaskV.shape.path = path(g.bounds, rr).cgPath
-                if g.mask !== glassMaskV { g.mask = glassMaskV }
-            } else {
-                if g.mask != nil { g.mask = nil }
-                g.layer.cornerCurve = .circular
-                g.layer.cornerRadius = rr
-                g.clipsToBounds = true
-            }
+            g.maxRadius = maxRadius; g.tailCorner = tailCorner; g.tailLeft = tailLeft
         } else if tailCorner {
             shapeMask.path = path(bounds, rr).cgPath
             layer.mask = shapeMask
@@ -1298,9 +1262,178 @@ final class LXBubbleView: UIView {
     }
 }
 
-final class LXShapeMaskView: UIView {
-    override class var layerClass: AnyClass { CAShapeLayer.self }
-    var shape: CAShapeLayer { layer as! CAShapeLayer }
+/// 气泡的薄玻璃(玻璃拟态,0926 她在网页小样里拖出来的数):很淡的白底 + 一圈上亮下暗的细边,不糊、不投影。
+/// 底都是白 0.07;浅底(白天):亮边 1.0、粗 1pt;深底(半月/月夜):亮边 0.13、粗 0.5pt。
+/// 亮边从上到下:rim → 45% 处 rim×0.2 → 底 浅底黑 rim×0.12 / 深底白 rim×0.08。
+/// 系统没有 2-3px 这么轻的背景模糊(最轻的 material 也是一整层磨砂),所以这里不糊。
+final class LXSoftGlassView: UIView {
+    var light = true { didSet { if light != oldValue { applyInk() } } }
+    var maxRadius: CGFloat = 18 { didSet { if maxRadius != oldValue { setNeedsLayout() } } }
+    var tailCorner = false { didSet { if tailCorner != oldValue { setNeedsLayout() } } }
+    var tailLeft = false { didSet { if tailLeft != oldValue { setNeedsLayout() } } }
+    private let fill = CAShapeLayer()
+    private let rim = CAGradientLayer()
+    private let rimMask = CAShapeLayer()
+    private var sig = ""
+
+    /// 字是深色=底是浅的
+    static func onLight(_ ink: UIColor) -> Bool { var w: CGFloat = 0; ink.getWhite(&w, alpha: nil); return w < 0.5 }
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        backgroundColor = .clear
+        layer.addSublayer(fill)
+        rim.startPoint = CGPoint(x: 0.5, y: 0)
+        rim.endPoint = CGPoint(x: 0.5, y: 1)
+        rim.locations = [0, 0.45, 1]
+        rimMask.fillColor = UIColor.clear.cgColor
+        rimMask.strokeColor = UIColor.black.cgColor
+        rim.mask = rimMask
+        layer.addSublayer(rim)
+        applyInk()
+    }
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    private var rimW: CGFloat { light ? 1 : 0.5 }
+
+    private func applyInk() {
+        let a: CGFloat = light ? 1 : 0.13
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        fill.fillColor = UIColor(white: 1, alpha: 0.07).cgColor
+        rim.colors = [UIColor(white: 1, alpha: a).cgColor,
+                      UIColor(white: 1, alpha: a * 0.2).cgColor,
+                      (light ? UIColor(white: 0, alpha: a * 0.12) : UIColor(white: 1, alpha: a * 0.08)).cgColor]
+        rimMask.lineWidth = rimW
+        CATransaction.commit()
+        sig = ""
+        setNeedsLayout()
+    }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        let b = bounds
+        let rr = min(maxRadius, b.height / 2)
+        let tr = tailCorner ? min(3, rr) : rr
+        let s = "\(b.width):\(b.height):\(rr):\(tr):\(tailLeft):\(light)"
+        guard s != sig else { return }
+        sig = s
+        let bl = tailLeft ? tr : rr, br = tailLeft ? rr : tr
+        let h = rimW / 2
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        fill.frame = b; rim.frame = b; rimMask.frame = b
+        fill.path = Self.path(b, tl: rr, tr: rr, bl: bl, br: br)
+        // 细边画在气泡里面:路径往里收半个线宽,外沿正好贴气泡边
+        rimMask.path = Self.path(b.insetBy(dx: h, dy: h), tl: max(0, rr - h), tr: max(0, rr - h),
+                                 bl: max(0, bl - h), br: max(0, br - h))
+        CATransaction.commit()
+    }
+
+    private static func path(_ r: CGRect, tl: CGFloat, tr: CGFloat, bl: CGFloat, br: CGFloat) -> CGPath {
+        let p = UIBezierPath()
+        p.move(to: CGPoint(x: r.minX + tl, y: r.minY))
+        p.addLine(to: CGPoint(x: r.maxX - tr, y: r.minY))
+        p.addArc(withCenter: CGPoint(x: r.maxX - tr, y: r.minY + tr), radius: tr, startAngle: -.pi / 2, endAngle: 0, clockwise: true)
+        p.addLine(to: CGPoint(x: r.maxX, y: r.maxY - br))
+        p.addArc(withCenter: CGPoint(x: r.maxX - br, y: r.maxY - br), radius: br, startAngle: 0, endAngle: .pi / 2, clockwise: true)
+        p.addLine(to: CGPoint(x: r.minX + bl, y: r.maxY))
+        p.addArc(withCenter: CGPoint(x: r.minX + bl, y: r.maxY - bl), radius: bl, startAngle: .pi / 2, endAngle: .pi, clockwise: true)
+        p.addLine(to: CGPoint(x: r.minX, y: r.minY + tl))
+        p.addArc(withCenter: CGPoint(x: r.minX + tl, y: r.minY + tl), radius: tl, startAngle: .pi, endAngle: -.pi / 2, clockwise: true)
+        p.close()
+        return p.cgPath
+    }
+}
+
+/// 预览 bubbles 路线专用:白天/半月/月夜各一段,每段上两条是薄玻璃(她调的数),下两条是系统 clear 玻璃;
+/// 左边那条在纯色上,右边那条在斜线花纹上。全是样板字,不碰任何真数据。左上一块品红记号:截图脚本认出它才打开看
+final class LXBubbleSampler: UIView {
+    static let beacon = CGRect(x: 4, y: 70, width: 20, height: 20)
+    private var built = false
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        backgroundColor = .black
+    }
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        guard !built, bounds.width > 100 else { return }
+        built = true
+        let top: CGFloat = 96, bandH = (bounds.height - top) / 3, side: CGFloat = 60, padH: CGFloat = 12.75, h: CGFloat = 31.75
+        let bands: [(bg: UInt32, fg: UInt32, dark: Bool)] = [(0xF6FBFF, 0x2A3A4D, false), (0x191917, 0xE9E5DC, true), (0x000000, 0xF5F5F5, true)]
+        for (i, b) in bands.enumerated() {
+            let fg = Self.hex(b.fg)
+            let band = UIView(frame: CGRect(x: 0, y: top + CGFloat(i) * bandH, width: bounds.width, height: bandH))
+            band.backgroundColor = Self.hex(b.bg)
+            band.clipsToBounds = true
+            band.overrideUserInterfaceStyle = b.dark ? .dark : .light
+            addSubview(band)
+            addLines(to: band, from: bounds.width / 2, color: fg.withAlphaComponent(0.3))
+            var y: CGFloat = 20
+            for sys in [false, true] {
+                for right in [false, true] {
+                    let l = UILabel()
+                    l.font = .systemFont(ofSize: 14)
+                    l.textColor = fg
+                    l.text = (sys ? "系统玻璃" : "薄玻璃") + (right ? "·花纹上" : "·纯色上")
+                    l.sizeToFit()
+                    let w = ceil(l.bounds.width) + 2 * padH
+                    let f = CGRect(x: right ? bounds.width - side - w : side, y: y, width: w, height: h)
+                    l.frame.origin = CGPoint(x: padH, y: (h - l.bounds.height) / 2)
+                    if sys {
+                        if #available(iOS 26.0, *) {
+                            let e = UIGlassEffect(style: .clear)
+                            e.isInteractive = false
+                            let g = UIVisualEffectView(effect: e)
+                            g.frame = f
+                            g.cornerConfiguration = .uniformCorners(radius: .fixed(h / 2))
+                            g.contentView.addSubview(l)
+                            band.addSubview(g)
+                        }
+                    } else {
+                        let bub = LXBubbleView(frame: f)
+                        bub.maxRadius = 16.8
+                        bub.tailCorner = right
+                        bub.tailLeft = !right
+                        bub.addSubview(l)
+                        bub.setGlass(true, light: LXSoftGlassView.onLight(fg))
+                        band.addSubview(bub)
+                    }
+                    y += h + 14
+                }
+            }
+        }
+        let mark = UIView(frame: Self.beacon)
+        mark.backgroundColor = UIColor(red: 1, green: 0, blue: 1, alpha: 1)
+        addSubview(mark)
+    }
+
+    private func addLines(to v: UIView, from x0: CGFloat, color: UIColor) {
+        let p = UIBezierPath()
+        let h = v.bounds.height
+        var x = x0 - h
+        while x < v.bounds.width {
+            p.move(to: CGPoint(x: x, y: h))
+            p.addLine(to: CGPoint(x: x + h, y: 0))
+            x += 14
+        }
+        let clip = CAShapeLayer()
+        clip.path = UIBezierPath(rect: CGRect(x: x0, y: 0, width: v.bounds.width - x0, height: h)).cgPath
+        let s = CAShapeLayer()
+        s.path = p.cgPath
+        s.strokeColor = color.cgColor
+        s.fillColor = nil
+        s.lineWidth = 1
+        s.mask = clip
+        v.layer.addSublayer(s)
+    }
+
+    private static func hex(_ v: UInt32) -> UIColor {
+        UIColor(red: CGFloat((v >> 16) & 255) / 255, green: CGFloat((v >> 8) & 255) / 255, blue: CGFloat(v & 255) / 255, alpha: 1)
+    }
 }
 
 enum LXMoonPalette {
@@ -2232,7 +2365,7 @@ final class LXBubbleCell: UITableViewCell {
         }
         if mine {
             bubble.backgroundColor = .clear
-            bubble.setGlass(!attOnly, tint: theme.me)
+            bubble.setGlass(!attOnly, light: LXSoftGlassView.onLight(theme.meFg))
             bubble.tailLeft = false
             tailCorner = !av && tail && !attOnly && !m.atts.contains { $0.kind == "image" }
             label.attributedText = Self.callIconed(Self.styled(m.text, base: Self.bubbleFont(av), color: theme.meFg, lineGap: Self.bubbleLine(av)), m, color: theme.meFg)
@@ -2256,7 +2389,7 @@ final class LXBubbleCell: UITableViewCell {
         } else {
             bubble.backgroundColor = .clear
             let boxed = av && !attOnly
-            bubble.setGlass(boxed, tint: theme.me)
+            bubble.setGlass(boxed, light: LXSoftGlassView.onLight(theme.meFg))
             bubble.layer.cornerRadius = 0
             bubble.tailLeft = true
             tailCorner = false
@@ -4679,7 +4812,8 @@ public class ChatListPlugin: CAPPlugin, CAPBridgedPlugin, UITableViewDataSource,
         paintStatus(typing: data.typingOn)
         armPushIntake()
 
-        if LustreConfig.isPreview && LustreConfig.previewFocus != "composer" {
+        if LustreConfig.isPreview && LustreConfig.previewFocus == "bubbles" { previewBubbleSampler() }
+        if LustreConfig.isPreview && !LustreConfig.previewNarrow {
             DispatchQueue.main.asyncAfter(deadline: .now() + 8) { [weak self] in
                 guard let s = self else { return }
                 var target: Int64? = nil
@@ -5275,6 +5409,28 @@ public class ChatListPlugin: CAPPlugin, CAPBridgedPlugin, UITableViewDataSource,
             LXWallStore.set(source: src)
             self.applyWall()
             call.resolve(["ok": true, "has": LXWallStore.image != nil])
+        }
+    }
+
+    /// 预览 bubbles 路线:一整页样板气泡盖在窗口最上面,真聊天藏起来;每秒再藏一次列表、再把样板页提到最上
+    private var bubbleSamplerDone = false
+    func previewBubbleSampler(tries: Int = 0) {
+        guard LustreConfig.isPreview, !bubbleSamplerDone else { return }
+        guard let t = table, let win = bridge?.viewController?.view.window else {
+            if tries < 40 {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in self?.previewBubbleSampler(tries: tries + 1) }
+            }
+            return
+        }
+        bubbleSamplerDone = true
+        t.isHidden = true
+        let page = LXBubbleSampler(frame: win.bounds)
+        page.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        win.addSubview(page)
+        Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self, weak page] tm in
+            guard let s = self, let p = page else { tm.invalidate(); return }
+            s.table?.isHidden = true
+            p.superview?.bringSubviewToFront(p)
         }
     }
 

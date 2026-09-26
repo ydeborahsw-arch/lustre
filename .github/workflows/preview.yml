@@ -5,9 +5,9 @@ on:
   workflow_dispatch:
     inputs:
       focus:
-        description: "tour = the full walk-through; composer = only the avatar-mode input bar"
+        description: "tour = the full walk-through; composer = only the avatar-mode input bar; bubbles = a page of sample bubbles"
         type: choice
-        options: [tour, composer]
+        options: [tour, composer, bubbles]
         default: tour
 
 env:
@@ -77,6 +77,10 @@ jobs:
             # The app hides the chat list in this route, so these shots hold nothing but the bar.
             sleep 5
             for t in $(seq 10 5 85); do sleep 5; shot c$t; done
+          elif [ "$LX_PREVIEW_FOCUS" = "bubbles" ]; then
+            # A full-screen page of sample bubbles covers everything; the chat list is hidden underneath.
+            sleep 5
+            for t in $(seq 10 5 40); do sleep 5; shot b$t; done
           else
             sleep 18;  shot p01
             sleep 12;  shot p02
@@ -95,7 +99,7 @@ jobs:
           xcrun simctl spawn "$UDID" log show --last 6m --style compact --predicate 'process == "App"' > shots/diag-applog.txt 2>&1 || true
           cp ~/Library/Logs/DiagnosticReports/App*.ips shots/ 2>/dev/null || true
           xcrun simctl terminate "$UDID" "$LX_BUNDLE" || true
-          if [ "$LX_PREVIEW_FOCUS" != "composer" ]; then
+          if [ "$LX_PREVIEW_FOCUS" = "tour" ]; then
             sleep 2
             xcrun simctl launch "$UDID" "$LX_BUNDLE"
             sleep 10;  shot p10

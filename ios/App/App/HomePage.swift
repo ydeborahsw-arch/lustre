@@ -2203,7 +2203,7 @@ public class HomePlugin: CAPPlugin, CAPBridgedPlugin, UIGestureRecognizerDelegat
 
     private func attach(host: UIView, theme: HomeTheme, flame: String, enter: Bool, deferLoad: Bool) {
         // 预览路线 composer 只拍输入栏:首页不上来(它晚到会盖住聊天页)
-        if LustreConfig.isPreview && LustreConfig.previewFocus == "composer" { return }
+        if LustreConfig.isPreview && LustreConfig.previewNarrow { return }
         var ghost: UIView? = nil
         for sub in host.subviews where sub is HomeView {
             if ghost == nil, !sub.isHidden, sub.alpha > 0.01,
@@ -2457,8 +2457,8 @@ public class HomePlugin: CAPPlugin, CAPBridgedPlugin, UIGestureRecognizerDelegat
     var homeDrawerOpen: Bool { !(home?.isHidden ?? true) && (home?.transform.tx ?? 0) > 0 }
     override public func load() {
         Self.live = self
-        // composer 路线只拍输入栏:下面这套首页自检 62 秒后会铺满全屏,不跑
-        guard LustreConfig.isPreview, LustreConfig.previewFocus != "composer" else { return }
+        // 只拍一样东西的路线(输入栏/样板气泡)不跑下面这套首页自检:它 62 秒后会铺满全屏
+        guard LustreConfig.isPreview, !LustreConfig.previewNarrow else { return }
         DispatchQueue.main.asyncAfter(deadline: .now() + 62) { [weak self] in
             guard let s = self, let host = s.bridge?.viewController?.view else { return }
             let v = HomeView(theme: HomeTheme(), flameURL: "")

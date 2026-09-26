@@ -272,6 +272,8 @@ enum LustreConfig {
         guard let lx = config["lustre"] as? [String: Any] else { return "" }
         return (lx["previewFocus"] as? String) ?? ""
     }()
+    /// 只拍一样东西、不许露真数据的预览路线(输入栏 / 样板气泡):首页自检和整套巡游都不跑
+    static var previewNarrow: Bool { previewFocus == "composer" || previewFocus == "bubbles" }
 
     static var isPreview: Bool = {
         if let lx = config["lustre"] as? [String: Any], lx["preview"] as? Bool == true { return true }
