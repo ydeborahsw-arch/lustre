@@ -4385,11 +4385,22 @@ public class ChatListPlugin: CAPPlugin, CAPBridgedPlugin, UITableViewDataSource,
     let data = LXChatData()
     var theme = LXChatTheme() {
         didSet {
+            // 0926 头像模式换输入栏样式。switchMoon 会先清零再恢复(假翻转),攒到下一拍只认最后的值;只动输入栏,聊天页不重建
+            if oldValue.avatars != theme.avatars, !composerStyleQueued {
+                composerStyleQueued = true
+                DispatchQueue.main.async { [weak self] in
+                    guard let self else { return }
+                    self.composerStyleQueued = false
+                    NativeInputPlugin.live?.setAvatarStyle(self.theme.avatars)
+                    self.syncCardGap()
+                }
+            }
             guard data.thinkInSheet != theme.avatars else { return }
             data.thinkInSheet = theme.avatars
             data.rebuild(stick: false)
         }
     }
+    private var composerStyleQueued = false
     var bottomC: NSLayoutConstraint?
     var gapTimer: Timer?
     var loadingOlder = false
@@ -4401,6 +4412,11 @@ public class ChatListPlugin: CAPPlugin, CAPBridgedPlugin, UITableViewDataSource,
     var drawerReady = false
     static let restGap: CGFloat = 70
     static let bottomOverhang: CGFloat = 220
+    /// 0926 她:头像模式不要底下那截留白。输入栏当成"下一行":每行框底已带 20.35,再补 avaLift 3.1,
+    /// 最后一个气泡到输入栏顶 = 气泡到气泡的 23.45
+    static let avaRestGap: CGFloat = LXBubbleCell.avaLift
+    var restGapNow: CGFloat { theme.avatars ? Self.avaRestGap : Self.restGap }
+    private var appliedRestGap: CGFloat = ChatListPlugin.restGap
 
     var stickDisarmed = false
     private var drawerBusy = false {
@@ -4506,8 +4522,9 @@ public class ChatListPlugin: CAPPlugin, CAPBridgedPlugin, UITableViewDataSource,
         t.keyboardDismissMode = .interactive
         t.transform = CGAffineTransform(scaleX: 1, y: -1)
         t.contentInsetAdjustmentBehavior = .never
-        t.contentInset = UIEdgeInsets(top: Self.restGap + Self.bottomOverhang, left: 0, bottom: hdrH + 6, right: 0)
-        t.verticalScrollIndicatorInsets = UIEdgeInsets(top: Self.restGap + Self.bottomOverhang, left: 0, bottom: hdrH, right: 0)
+        t.contentInset = UIEdgeInsets(top: restGapNow + Self.bottomOverhang, left: 0, bottom: hdrH + 6, right: 0)
+        t.verticalScrollIndicatorInsets = UIEdgeInsets(top: restGapNow + Self.bottomOverhang, left: 0, bottom: hdrH, right: 0)
+        appliedRestGap = restGapNow
         t.register(LXBubbleCell.self, forCellReuseIdentifier: LXBubbleCell.reuse)
         t.register(LXBubbleCell.self, forCellReuseIdentifier: LXBubbleCell.reuseGlass)
         t.register(LXDayCell.self, forCellReuseIdentifier: LXDayCell.reuse)
@@ -4934,10 +4951,15 @@ public class ChatListPlugin: CAPPlugin, CAPBridgedPlugin, UITableViewDataSource,
             if let c = NativeInputPlugin.live?.card, c.transform != want { c.transform = want }
         }
         if let cont = container, cont.transform.tx != 0 { return }
-        if tb.contentInset.top != Self.restGap + Self.bottomOverhang {
-            tb.contentInset.top = Self.restGap + Self.bottomOverhang
-            tb.verticalScrollIndicatorInsets.top = Self.restGap + Self.bottomOverhang
+        let want = restGapNow + Self.bottomOverhang
+        if tb.contentInset.top != want {
+            // 头像模式开关换了停靠留白:原来停在最底的,跟着停到新的最底;别的原因回弹 inset 照旧只改 inset
+            let atRest = appliedRestGap != restGapNow && abs(tb.contentOffset.y + tb.contentInset.top) < 1
+            tb.contentInset.top = want
+            tb.verticalScrollIndicatorInsets.top = want
+            if atRest { tb.contentOffset.y = -want }
         }
+        appliedRestGap = restGapNow
         syncEdgeFades()
     }
 

@@ -1004,6 +1004,28 @@ public class NativeInputPlugin: CAPPlugin, CAPBridgedPlugin, UITextViewDelegate 
     var recCancelBtn: UIButton?
     var micWC: NSLayoutConstraint?
     var chipFgC = UIColor(white: 0.82, alpha: 1)
+    // 0926 头像模式输入栏:左语音圆 / 中间输入药丸 / 右胶囊(星芒+加号)。还是这一张 card,
+    // 这些在建卡时一次建好、平时藏着,切样式只动 isHidden 和约束(新建玻璃会闪一帧)
+    var avatarOn = false
+    var avVoiceG: UIVisualEffectView?
+    var avPillG: UIVisualEffectView?
+    var avCapG: UIVisualEffectView?
+    var avVoiceBtn: UIButton?
+    var avModelBtn: UIButton?
+    var avPlusBtn: UIButton?
+    var avRecDot: UIView?
+    var avRecL: UILabel?
+    var avPillHC: NSLayoutConstraint?
+    var avTvBotC: NSLayoutConstraint?
+    var cardLeadC: NSLayoutConstraint?
+    var cardTrailC: NSLayoutConstraint?
+    var cardMarginX: CGFloat = 10
+    var normalCons: [NSLayoutConstraint] = []
+    var avatarCons: [NSLayoutConstraint] = []
+    var normalPh = "Chat with Claude"
+    var modelHasName = false
+    var savedShadowHidden = false
+    var savedBorderW: CGFloat = 0
 
     @objc func enable(_ call: CAPPluginCall) {
         DispatchQueue.main.async {
@@ -1170,6 +1192,7 @@ public class NativeInputPlugin: CAPPlugin, CAPBridgedPlugin, UITextViewDelegate 
             if self.card != nil {
                 if hidden || !self.tvCardConstraints.isEmpty { self.card?.isHidden = hidden }
                 self.applyStyle(call); self.applyCardTheme(call)
+                self.setAvatarStyle(NativeInputPlugin.avatarWanted())
                 call.resolve(["ok": true]); return
             }
 
@@ -1178,6 +1201,8 @@ public class NativeInputPlugin: CAPPlugin, CAPBridgedPlugin, UITextViewDelegate 
             let gapBottom = CGFloat(call.getFloat("gapBottom") ?? 8)
             self.cardMinH = CGFloat(call.getFloat("minH") ?? 96)
             self.cardMaxH = CGFloat(call.getFloat("maxH") ?? 220)
+            self.cardMarginX = marginX
+            self.avatarOn = false   // 新卡先按普通样式建,末尾再按头像开关切
 
             let cardV = UIView()
             cardV.translatesAutoresizingMaskIntoConstraints = false
@@ -1335,22 +1360,36 @@ public class NativeInputPlugin: CAPPlugin, CAPBridgedPlugin, UITextViewDelegate 
             self.quoteTopC = qbTop; self.quoteHC = qbH
             let micW = mic.widthAnchor.constraint(equalToConstant: 34)
             self.micWC = micW
+            // 头像样式要换掉的几条单独拿名字,切样式时整组停用/启用
+            let rowTopN = row.topAnchor.constraint(equalTo: cardV.topAnchor, constant: 6)
+            let rowLeadN = row.leadingAnchor.constraint(equalTo: cardV.leadingAnchor, constant: 15)
+            let rowTrailN = row.trailingAnchor.constraint(equalTo: cardV.trailingAnchor, constant: -15)
+            let sendTrailN = send.trailingAnchor.constraint(equalTo: cardV.trailingAnchor, constant: -10)
+            let sendYN = send.centerYAnchor.constraint(equalTo: plus.centerYAnchor)
+            let recXTrailN = recX.trailingAnchor.constraint(equalTo: mic.leadingAnchor, constant: -8)
+            let recXYN = recX.centerYAnchor.constraint(equalTo: plus.centerYAnchor)
+            let qbLeadN = qb.leadingAnchor.constraint(equalTo: cardV.leadingAnchor, constant: 15)
+            let qbTrailN = qb.trailingAnchor.constraint(equalTo: cardV.trailingAnchor, constant: -15)
+            self.normalCons = [rowTopN, rowLeadN, rowTrailN, sendTrailN, sendYN, recXTrailN, recXYN, qbLeadN, qbTrailN]
+            let cardLead = cardV.leadingAnchor.constraint(equalTo: host.leadingAnchor, constant: marginX)
+            let cardTrail = cardV.trailingAnchor.constraint(equalTo: host.trailingAnchor, constant: -marginX)
+            self.cardLeadC = cardLead; self.cardTrailC = cardTrail
             NSLayoutConstraint.activate([
                 blur.topAnchor.constraint(equalTo: cardV.topAnchor),
                 blur.bottomAnchor.constraint(equalTo: cardV.bottomAnchor),
                 blur.leadingAnchor.constraint(equalTo: cardV.leadingAnchor),
                 blur.trailingAnchor.constraint(equalTo: cardV.trailingAnchor),
-                row.topAnchor.constraint(equalTo: cardV.topAnchor, constant: 6),
-                row.leadingAnchor.constraint(equalTo: cardV.leadingAnchor, constant: 15),
-                row.trailingAnchor.constraint(equalTo: cardV.trailingAnchor, constant: -15),
+                rowTopN,
+                rowLeadN,
+                rowTrailN,
                 rowH,
                 stack.topAnchor.constraint(equalTo: row.contentLayoutGuide.topAnchor),
                 stack.bottomAnchor.constraint(equalTo: row.contentLayoutGuide.bottomAnchor),
                 stack.leadingAnchor.constraint(equalTo: row.contentLayoutGuide.leadingAnchor),
                 stack.trailingAnchor.constraint(equalTo: row.contentLayoutGuide.trailingAnchor),
                 stack.heightAnchor.constraint(equalTo: row.frameLayoutGuide.heightAnchor),
-                cardV.leadingAnchor.constraint(equalTo: host.leadingAnchor, constant: marginX),
-                cardV.trailingAnchor.constraint(equalTo: host.trailingAnchor, constant: -marginX),
+                cardLead,
+                cardTrail,
                 cardV.bottomAnchor.constraint(equalTo: host.keyboardLayoutGuide.topAnchor, constant: -gapBottom),
                 hC,
                 plus.leadingAnchor.constraint(equalTo: cardV.leadingAnchor, constant: 10),
@@ -1360,22 +1399,22 @@ public class NativeInputPlugin: CAPPlugin, CAPBridgedPlugin, UITextViewDelegate 
                 model.leadingAnchor.constraint(equalTo: plus.trailingAnchor, constant: 7),
                 model.centerYAnchor.constraint(equalTo: plus.centerYAnchor),
                 model.heightAnchor.constraint(equalToConstant: 34),
-                send.trailingAnchor.constraint(equalTo: cardV.trailingAnchor, constant: -10),
-                send.centerYAnchor.constraint(equalTo: plus.centerYAnchor),
+                sendTrailN,
+                sendYN,
                 send.widthAnchor.constraint(equalToConstant: 34),
                 send.heightAnchor.constraint(equalToConstant: 34),
                 mic.trailingAnchor.constraint(equalTo: send.leadingAnchor, constant: -8),
                 mic.centerYAnchor.constraint(equalTo: plus.centerYAnchor),
                 micW,
                 mic.heightAnchor.constraint(equalToConstant: 34),
-                recX.trailingAnchor.constraint(equalTo: mic.leadingAnchor, constant: -8),
-                recX.centerYAnchor.constraint(equalTo: plus.centerYAnchor),
+                recXTrailN,
+                recXYN,
                 recX.widthAnchor.constraint(equalToConstant: 34),
                 recX.heightAnchor.constraint(equalToConstant: 34),
                 qbTop,
                 qbH,
-                qb.leadingAnchor.constraint(equalTo: cardV.leadingAnchor, constant: 15),
-                qb.trailingAnchor.constraint(equalTo: cardV.trailingAnchor, constant: -15),
+                qbLeadN,
+                qbTrailN,
                 qa.leadingAnchor.constraint(equalTo: qb.leadingAnchor),
                 qa.topAnchor.constraint(equalTo: qb.topAnchor),
                 qa.bottomAnchor.constraint(equalTo: qb.bottomAnchor),
@@ -1391,10 +1430,11 @@ public class NativeInputPlugin: CAPPlugin, CAPBridgedPlugin, UITextViewDelegate 
                 qx.widthAnchor.constraint(equalToConstant: 26),
                 qx.heightAnchor.constraint(equalToConstant: 26)
             ])
+            self.buildAvatarPieces(cardV, above: tint, row: row, quote: qb)
             self.tvCardConstraints = self.tvConstraintsInCard(t, cardV)
             NSLayoutConstraint.activate(self.tvCardConstraints)
             self.ensurePlaceholder()
-            if let ph = call.getString("ph") { self.phLabel?.text = ph }
+            if let ph = call.getString("ph") { self.normalPh = ph; self.phLabel?.text = ph }
             self.applyStyle(call)
             self.applyCardTheme(call)
             let mn = call.getString("modelName") ?? call.getString("model") ?? ""
@@ -1405,11 +1445,191 @@ public class NativeInputPlugin: CAPPlugin, CAPBridgedPlugin, UITextViewDelegate 
             }
             self.updateSendIcon()
             self.updateCardHeight()
+            self.setAvatarStyle(NativeInputPlugin.avatarWanted())
             call.resolve(["ok": true, "v": 4])
         }
     }
 
+    /// 头像开关:聊天页的 theme 为准;聊天页还没起来时(纯原生)先读存的开关
+    static func avatarWanted() -> Bool {
+        if let chat = ChatListPlugin.live { return chat.theme.avatars }
+        return LustreConfig.webless && UserDefaults.standard.bool(forKey: ChatListPlugin.avatarsKey)
+    }
+
+    /// 0926 头像样式的三块玻璃 + 按钮 + 录音红点/计时。只在建卡时建这一次,平时 isHidden。
+    /// 量她的参考图(402 宽)1:1:语音圆 40、药丸最矮 40 圆角 20、胶囊 82×46 圆角 23,间距 8
+    func buildAvatarPieces(_ cardV: UIView, above tint: UIView, row: UIView, quote qb: UIView) {
+        guard let send = sendBtn, let recX = recCancelBtn else { return }
+        let mkGlass = { (r: CGFloat) -> UIVisualEffectView in
+            let fx: UIVisualEffect
+            // 气泡用的是 .clear,这里用另一种 .regular;旧系统照卡片的材质
+            if #available(iOS 26.0, *) { fx = UIGlassEffect(style: .regular) } else { fx = UIBlurEffect(style: .systemThickMaterialDark) }
+            let g = UIVisualEffectView(effect: fx)
+            g.translatesAutoresizingMaskIntoConstraints = false
+            g.isUserInteractionEnabled = false
+            g.layer.cornerRadius = r
+            g.layer.cornerCurve = .continuous
+            g.clipsToBounds = true
+            if #available(iOS 26.0, *) { g.cornerConfiguration = .uniformCorners(radius: .fixed(r)) } else { g.layer.borderWidth = 1 }
+            g.isHidden = true
+            cardV.insertSubview(g, aboveSubview: tint)
+            return g
+        }
+        let voiceG = mkGlass(20), pillG = mkGlass(20), capG = mkGlass(23)
+        let mkBtn = { (img: UIImage) -> UIButton in
+            let b = UIButton(type: .system)
+            b.translatesAutoresizingMaskIntoConstraints = false
+            b.setImage(img, for: .normal)
+            b.tintColor = UIColor(white: 0.82, alpha: 1)
+            b.isHidden = true
+            cardV.addSubview(b)
+            return b
+        }
+        let voiceB = mkBtn(NativeInputPlugin.voiceIcon())
+        let starB = mkBtn(NativeInputPlugin.starIcon())
+        let plusB = mkBtn(NativeInputPlugin.ringPlusIcon())
+        // 胶囊左右各一半当点击区;图标中心离两头 21.5(半宽 41,往外挪 1)
+        starB.contentEdgeInsets = UIEdgeInsets(top: 0, left: 2, bottom: 0, right: 0)
+        plusB.contentEdgeInsets = UIEdgeInsets(top: 0, left: 0, bottom: 0, right: 2)
+        voiceB.addAction(UIAction { [weak self] _ in
+            guard let s = self else { return }
+            if s.recorder != nil { s.recStop(send: true) } else { s.showMicMiniMenu() }
+        }, for: .touchUpInside)
+        starB.addAction(UIAction { [weak self] _ in self?.showModelSheet() }, for: .touchUpInside)
+        plusB.addAction(UIAction { [weak self] _ in self?.showPlusSheet() }, for: .touchUpInside)
+        let dot = UIView()
+        dot.translatesAutoresizingMaskIntoConstraints = false
+        dot.backgroundColor = .systemRed
+        dot.layer.cornerRadius = 4
+        dot.isHidden = true
+        let recL = UILabel()
+        recL.translatesAutoresizingMaskIntoConstraints = false
+        recL.font = UIFont.monospacedDigitSystemFont(ofSize: 15, weight: .regular)
+        recL.textColor = UIColor(white: 0.82, alpha: 1)
+        recL.isHidden = true
+        cardV.addSubview(dot); cardV.addSubview(recL)
+        avVoiceG = voiceG; avPillG = pillG; avCapG = capG
+        avVoiceBtn = voiceB; avModelBtn = starB; avPlusBtn = plusB
+        avRecDot = dot; avRecL = recL
+        let pillH = pillG.heightAnchor.constraint(equalToConstant: 40)
+        avPillHC = pillH
+        // 这些只管头像样式自己的东西,两种样式下都开着也不冲突
+        NSLayoutConstraint.activate([
+            voiceG.leadingAnchor.constraint(equalTo: cardV.leadingAnchor),
+            voiceG.bottomAnchor.constraint(equalTo: cardV.bottomAnchor, constant: -3),
+            voiceG.widthAnchor.constraint(equalToConstant: 40),
+            voiceG.heightAnchor.constraint(equalToConstant: 40),
+            capG.trailingAnchor.constraint(equalTo: cardV.trailingAnchor),
+            capG.bottomAnchor.constraint(equalTo: cardV.bottomAnchor),
+            capG.widthAnchor.constraint(equalToConstant: 82),
+            capG.heightAnchor.constraint(equalToConstant: 46),
+            pillG.leadingAnchor.constraint(equalTo: voiceG.trailingAnchor, constant: 8),
+            pillG.trailingAnchor.constraint(equalTo: capG.leadingAnchor, constant: -8),
+            pillG.bottomAnchor.constraint(equalTo: cardV.bottomAnchor, constant: -3),
+            pillH,
+            voiceB.leadingAnchor.constraint(equalTo: voiceG.leadingAnchor),
+            voiceB.trailingAnchor.constraint(equalTo: voiceG.trailingAnchor),
+            voiceB.topAnchor.constraint(equalTo: voiceG.topAnchor),
+            voiceB.bottomAnchor.constraint(equalTo: voiceG.bottomAnchor),
+            starB.leadingAnchor.constraint(equalTo: capG.leadingAnchor),
+            starB.topAnchor.constraint(equalTo: capG.topAnchor),
+            starB.bottomAnchor.constraint(equalTo: capG.bottomAnchor),
+            starB.widthAnchor.constraint(equalTo: capG.widthAnchor, multiplier: 0.5),
+            plusB.trailingAnchor.constraint(equalTo: capG.trailingAnchor),
+            plusB.topAnchor.constraint(equalTo: capG.topAnchor),
+            plusB.bottomAnchor.constraint(equalTo: capG.bottomAnchor),
+            plusB.widthAnchor.constraint(equalTo: capG.widthAnchor, multiplier: 0.5),
+            dot.leadingAnchor.constraint(equalTo: pillG.leadingAnchor, constant: 15),
+            dot.centerYAnchor.constraint(equalTo: pillG.bottomAnchor, constant: -20),
+            dot.widthAnchor.constraint(equalToConstant: 8),
+            dot.heightAnchor.constraint(equalToConstant: 8),
+            recL.leadingAnchor.constraint(equalTo: dot.trailingAnchor, constant: 8),
+            recL.centerYAnchor.constraint(equalTo: dot.centerYAnchor),
+        ])
+        // 和 normalCons 一一对应:附件条/引用条进药丸(左右 15),发送键和录音 × 贴药丸右下 3
+        avatarCons = [
+            row.topAnchor.constraint(equalTo: pillG.topAnchor, constant: 6),
+            row.leadingAnchor.constraint(equalTo: pillG.leadingAnchor, constant: 15),
+            row.trailingAnchor.constraint(equalTo: pillG.trailingAnchor, constant: -15),
+            send.trailingAnchor.constraint(equalTo: pillG.trailingAnchor, constant: -3),
+            send.bottomAnchor.constraint(equalTo: pillG.bottomAnchor, constant: -3),
+            recX.trailingAnchor.constraint(equalTo: pillG.trailingAnchor, constant: -3),
+            recX.bottomAnchor.constraint(equalTo: pillG.bottomAnchor, constant: -3),
+            qb.leadingAnchor.constraint(equalTo: pillG.leadingAnchor, constant: 15),
+            qb.trailingAnchor.constraint(equalTo: pillG.trailingAnchor, constant: -15),
+        ]
+    }
+
+    /// 0926 切输入栏样式(头像模式开/关)。同一张 card,只切里面的玻璃、按钮和约束;聊天页不重建
+    func setAvatarStyle(_ on: Bool) {
+        guard let cardV = card, avPillG != nil, on != avatarOn else { return }
+        let rec = recorder != nil
+        if rec { recVisual(false, animated: false) }
+        avatarOn = on
+        if on {
+            savedShadowHidden = cardShadow?.isHidden ?? true
+            savedBorderW = cardV.layer.borderWidth
+            cardShadow?.isHidden = true
+            cardV.layer.borderWidth = 0
+        } else {
+            cardShadow?.isHidden = savedShadowHidden
+            cardV.layer.borderWidth = savedBorderW
+        }
+        cardBlur?.isHidden = on
+        cardTint?.isHidden = on
+        plusBtn?.isHidden = on
+        micBtn?.isHidden = on
+        modelBtn?.isHidden = on || !modelHasName
+        let avViews: [UIView?] = [avVoiceG, avPillG, avCapG, avVoiceBtn, avModelBtn, avPlusBtn]
+        for v in avViews { v?.isHidden = !on }
+        cardLeadC?.constant = on ? 4.5 : cardMarginX
+        cardTrailC?.constant = on ? -4.5 : -cardMarginX
+        NSLayoutConstraint.deactivate(on ? normalCons : avatarCons)
+        NSLayoutConstraint.activate(on ? avatarCons : normalCons)
+        if let t = tv, !tvCardConstraints.isEmpty {
+            NSLayoutConstraint.deactivate(tvCardConstraints)
+            tvCardConstraints = tvConstraintsInCard(t, cardV)
+            NSLayoutConstraint.activate(tvCardConstraints)
+        }
+        phLabel?.text = on ? "Message" : normalPh
+        if on { sendBtn?.setImage(NativeInputPlugin.arrowIcon(size: 20), for: .normal) } else { updateSendIcon() }
+        syncAvatarSend(animated: false)
+        if rec { recVisual(true, animated: false) }
+        // 先按新宽度排一遍,contentSize 才是新宽度下的,再算高
+        cardV.superview?.layoutIfNeeded()
+        tv?.layoutIfNeeded()
+        updateCardHeight()
+        layoutPlaceholder()
+    }
+
+    /// 头像样式的发送键:有字或有附件才露;只淡它自己 0.15s,不动布局。录音时让位给 ×
+    func syncAvatarSend(animated: Bool) {
+        guard let b = sendBtn else { return }
+        let want: CGFloat = (!avatarOn || (sendHasText && recorder == nil)) ? 1 : 0
+        if b.alpha == want { return }
+        if animated {
+            UIView.animate(withDuration: 0.15, delay: 0, options: [.beginFromCurrentState, .allowUserInteraction]) {
+                b.alpha = want
+            }
+        } else {
+            b.alpha = want
+        }
+    }
+
     func tvConstraintsInCard(_ t: UITextView, _ cardV: UIView) -> [NSLayoutConstraint] {
+        if avatarOn, let pill = avPillG {
+            // 头像样式:字在药丸里,字左边离药丸 15、右边整段留 43(3 + 发送键 34 + 6),发送键出没字不挪;
+            // 上接引用条、下贴药丸底,两头的常数由 updateCardHeight 算(一行时在 40 里正中)
+            let inset = t.textContainerInset
+            let top = t.topAnchor.constraint(equalTo: quoteBar?.bottomAnchor ?? pill.topAnchor, constant: 0)
+            let bot = t.bottomAnchor.constraint(equalTo: pill.bottomAnchor, constant: 0)
+            tvTopC = top; avTvBotC = bot
+            return [
+                top, bot,
+                t.leadingAnchor.constraint(equalTo: pill.leadingAnchor, constant: 15 - inset.left),
+                t.trailingAnchor.constraint(equalTo: pill.trailingAnchor, constant: -(43 - inset.right))
+            ]
+        }
         guard let plus = plusBtn else { return [] }
         let topRef = quoteBar?.bottomAnchor ?? attsRow?.bottomAnchor ?? cardV.topAnchor
         let hasStuff = attsCount > 0 || quoteIsOn
@@ -1444,6 +1664,11 @@ public class NativeInputPlugin: CAPPlugin, CAPBridgedPlugin, UITextViewDelegate 
 
     func teardownCardExtras() {
         if recorder != nil { recStop(send: false) }
+        // 头像样式跟着卡片一起拆;录音中拆卡时字框被藏过,放回来
+        if avatarOn { avatarOn = false; tv?.isHidden = false }
+        avVoiceG = nil; avPillG = nil; avCapG = nil; avVoiceBtn = nil; avModelBtn = nil; avPlusBtn = nil
+        avRecDot = nil; avRecL = nil; avPillHC = nil; avTvBotC = nil; cardLeadC = nil; cardTrailC = nil
+        normalCons = []; avatarCons = []
         quoteBar = nil; quoteAccentV = nil; quoteNameL = nil; quoteTextL = nil; quoteXBtn = nil
         quoteHC = nil; quoteTopC = nil; quoteIsOn = false
         recCancelBtn = nil; micWC = nil
@@ -1514,7 +1739,11 @@ public class NativeInputPlugin: CAPPlugin, CAPBridgedPlugin, UITextViewDelegate 
                 self.setModelTitle(name: label, effort: "")
             }
             self.syncSendIcon()
-            if let ph = call.getString("ph") { self.phLabel?.text = ph; self.layoutPlaceholder() }
+            if let ph = call.getString("ph") {
+                // 这个占位只归普通样式;头像样式固定 "Message"
+                self.normalPh = ph
+                self.phLabel?.text = self.avatarOn ? "Message" : ph; self.layoutPlaceholder()
+            }
             _ = call.getArray("atts")
             _ = call.getBool("quoteOn")
             call.resolve(["ok": true])
@@ -1537,9 +1766,12 @@ public class NativeInputPlugin: CAPPlugin, CAPBridgedPlugin, UITextViewDelegate 
             var a = CGFloat(call.getFloat("bgAlpha") ?? 0.55)
             if #available(iOS 26.0, *) { a = 0 }
             cardTint?.backgroundColor = c.withAlphaComponent(a)
+            // 头像样式三块玻璃:旧系统照卡片铺同一层底色(26 上 a=0 就是透明)
+            for g in [avVoiceG, avPillG, avCapG] { g?.contentView.backgroundColor = c.withAlphaComponent(a) }
         }
         if let bhex = call.getString("border"), let bc = NativeInputPlugin.color(bhex) {
             card?.layer.borderColor = bc.withAlphaComponent(CGFloat(call.getFloat("borderAlpha") ?? 0.35)).cgColor
+            for g in [avVoiceG, avPillG, avCapG] { g?.layer.borderColor = card?.layer.borderColor }
         }
         if let shex = call.getString("sendBg"), let sc = NativeInputPlugin.color(shex) { sendBtn?.backgroundColor = sc }
         if let sfhex = call.getString("sendFg"), let sfc = NativeInputPlugin.color(sfhex) { sendBtn?.tintColor = sfc }
@@ -1578,6 +1810,13 @@ public class NativeInputPlugin: CAPPlugin, CAPBridgedPlugin, UITextViewDelegate 
             for b in [plusBtn, recCancelBtn] { b?.backgroundColor = chip; b?.tintColor = fg }
             if let m = micBtn { m.backgroundColor = chip; if recorder == nil { m.tintColor = fg } }
             modelBtn?.backgroundColor = chip
+            // 头像样式:玻璃跟深浅走(同卡片),三颗图标和录音计时用同一支图标墨;录音中的语音圆保持红
+            for g in [avVoiceG, avPillG, avCapG] {
+                if #available(iOS 26.0, *) { g?.overrideUserInterfaceStyle = dark ? .dark : .light }
+                else { g?.effect = UIBlurEffect(style: dark ? .systemThickMaterialDark : .systemThinMaterialLight) }
+            }
+            avModelBtn?.tintColor = fg; avPlusBtn?.tintColor = fg; avRecL?.textColor = fg
+            if !(avatarOn && recorder != nil) { avVoiceBtn?.tintColor = fg }
             let want: UIKeyboardAppearance = dark ? .dark : .light
             if let t = tv, t.keyboardAppearance != want {
                 t.keyboardAppearance = want
@@ -1600,7 +1839,8 @@ public class NativeInputPlugin: CAPPlugin, CAPBridgedPlugin, UITextViewDelegate 
 
     func setModelTitle(name: String, effort: String) {
         guard let b = modelBtn else { return }
-        b.isHidden = name.isEmpty
+        modelHasName = !name.isEmpty
+        b.isHidden = name.isEmpty || avatarOn   // 头像样式里模型走胶囊的星芒,这个胶囊一直藏着
         let name = NativeInputPlugin.prettyModel(name)
         let f = UIFont(name: "AnthropicSansWebVariable-TextRegular", size: 13) ?? UIFont.systemFont(ofSize: 13)
         let a = NSMutableAttributedString(string: name, attributes: [.font: f, .foregroundColor: modelFgC])
@@ -1611,6 +1851,7 @@ public class NativeInputPlugin: CAPPlugin, CAPBridgedPlugin, UITextViewDelegate 
     }
 
     func updateSendIcon() {
+        if avatarOn { syncAvatarSend(animated: true); return }   // 头像样式箭头常驻,只管露不露
         sendBtn?.setImage(sendHasText ? NativeInputPlugin.arrowIcon(size: 20) : NativeInputPlugin.waveIcon(), for: .normal)
     }
 
@@ -1681,6 +1922,64 @@ public class NativeInputPlugin: CAPPlugin, CAPBridgedPlugin, UITextViewDelegate 
                      startAngle: .pi, endAngle: 0, clockwise: false)
             p.move(to: CGPoint(x: 12 * s, y: 18 * s))
             p.addLine(to: CGPoint(x: 12 * s, y: 21 * s))
+            p.stroke()
+        }.withRenderingMode(.alwaysTemplate)
+    }
+
+    // 0926 头像样式三颗图标,量她的参考图 1:1:外圈 d26.7、线宽 1.67,模板图由主题图标墨着色
+    private static let avIconD: CGFloat = 26.7
+    private static let avIconW: CGFloat = 1.67
+    private static func avRing() {
+        let d = avIconD, w = avIconW
+        let ring = UIBezierPath(ovalIn: CGRect(x: w / 2, y: w / 2, width: d - w, height: d - w))
+        ring.lineWidth = w
+        ring.stroke()
+    }
+    /// 语音:圈里一个实心点(d2.7,在圆心左 4.3),点上两道开口朝右的弧(半径 4.5 / 8.2,±45°,圆头)
+    static func voiceIcon() -> UIImage {
+        let d = avIconD, w = avIconW
+        let r = UIGraphicsImageRenderer(size: CGSize(width: d, height: d))
+        return r.image { _ in
+            UIColor.black.setStroke(); UIColor.black.setFill()
+            avRing()
+            let o = CGPoint(x: d / 2 - 4.3, y: d / 2)
+            UIBezierPath(ovalIn: CGRect(x: o.x - 1.35, y: o.y - 1.35, width: 2.7, height: 2.7)).fill()
+            for rad: CGFloat in [4.5, 8.2] {
+                let a = UIBezierPath(arcCenter: o, radius: rad, startAngle: -.pi / 4, endAngle: .pi / 4, clockwise: true)
+                a.lineWidth = w
+                a.lineCapStyle = .round
+                a.stroke()
+            }
+        }.withRenderingMode(.alwaysTemplate)
+    }
+    /// 加号:圈 + 两根 13.3×1.5 的横竖条(圆头)
+    static func ringPlusIcon() -> UIImage {
+        let d = avIconD, c = avIconD / 2, len: CGFloat = 13.3, th: CGFloat = 1.5
+        let r = UIGraphicsImageRenderer(size: CGSize(width: d, height: d))
+        return r.image { _ in
+            UIColor.black.setStroke(); UIColor.black.setFill()
+            avRing()
+            UIBezierPath(roundedRect: CGRect(x: c - len / 2, y: c - th / 2, width: len, height: th), cornerRadius: th / 2).fill()
+            UIBezierPath(roundedRect: CGRect(x: c - th / 2, y: c - len / 2, width: th, height: len), cornerRadius: th / 2).fill()
+        }.withRenderingMode(.alwaysTemplate)
+    }
+    /// 模型:放射星芒 26.7。用页脚那颗星(footstar.png,页脚里本来就是 26 号在用);读不到才自己画 12 道光
+    static func starIcon() -> UIImage {
+        let d = avIconD, w = avIconW, c = avIconD / 2
+        let r = UIGraphicsImageRenderer(size: CGSize(width: d, height: d))
+        if let base = LXFootCell.starImg {
+            return r.image { _ in base.draw(in: CGRect(x: 0, y: 0, width: d, height: d)) }.withRenderingMode(.alwaysTemplate)
+        }
+        return r.image { _ in
+            let p = UIBezierPath()
+            for i in 0..<12 {
+                let a = CGFloat(i) * .pi / 6
+                p.move(to: CGPoint(x: c, y: c))
+                p.addLine(to: CGPoint(x: c + (c - w / 2) * cos(a), y: c + (c - w / 2) * sin(a)))
+            }
+            p.lineWidth = w
+            p.lineCapStyle = .round
+            UIColor.black.setStroke()
             p.stroke()
         }.withRenderingMode(.alwaysTemplate)
     }
@@ -2314,7 +2613,8 @@ public class NativeInputPlugin: CAPPlugin, CAPBridgedPlugin, UITextViewDelegate 
     }
 
     func showMicMiniMenu() {
-        guard miniMenu == nil, let host = card?.superview, let anchor = micBtn else { return }
+        // 头像样式挂在左边的语音圆上(左对齐往右长),普通样式照旧挂右边麦克风(右对齐)
+        guard miniMenu == nil, let host = card?.superview, let anchor = (avatarOn ? avVoiceBtn : micBtn) else { return }
         let overlay = UIControl(frame: host.bounds)
         overlay.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         overlay.addAction(UIAction { [weak self] _ in self?.hideMicMiniMenu() }, for: .touchUpInside)
@@ -2360,7 +2660,8 @@ public class NativeInputPlugin: CAPPlugin, CAPBridgedPlugin, UITextViewDelegate 
             col.bottomAnchor.constraint(equalTo: panel.bottomAnchor, constant: -4),
             col.leadingAnchor.constraint(equalTo: panel.leadingAnchor),
             col.trailingAnchor.constraint(equalTo: panel.trailingAnchor),
-            panel.trailingAnchor.constraint(equalTo: host.leadingAnchor, constant: af.maxX),
+            avatarOn ? panel.leadingAnchor.constraint(equalTo: host.leadingAnchor, constant: af.minX)
+                     : panel.trailingAnchor.constraint(equalTo: host.leadingAnchor, constant: af.maxX),
             panel.bottomAnchor.constraint(equalTo: host.topAnchor, constant: af.minY - 8),
         ])
         panel.transform = CGAffineTransform(translationX: 0, y: 6).scaledBy(x: 0.9, y: 0.9)
@@ -2429,14 +2730,19 @@ public class NativeInputPlugin: CAPPlugin, CAPBridgedPlugin, UITextViewDelegate 
     func enterRecUI() {
         guard let mic = micBtn else { return }
         hideMicMiniMenu()
-        mic.tintColor = .systemRed
-        mic.setTitle(" 0:00", for: .normal)
-        micWC?.constant = 78
-        recCancelBtn?.isHidden = false
+        if avatarOn {
+            recVisual(true)
+        } else {
+            mic.tintColor = .systemRed
+            mic.setTitle(" 0:00", for: .normal)
+            micWC?.constant = 78
+            recCancelBtn?.isHidden = false
+        }
         card?.superview?.layoutIfNeeded()
         recTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
             guard let self, let t0 = self.recT0 else { return }
             let s = Int(Date().timeIntervalSince(t0))
+            if self.avatarOn { self.avRecL?.text = String(format: "%d:%02d", s / 60, s % 60); return }
             self.micBtn?.setTitle(String(format: " %d:%02d", s / 60, s % 60), for: .normal)
         }
     }
@@ -2445,15 +2751,60 @@ public class NativeInputPlugin: CAPPlugin, CAPBridgedPlugin, UITextViewDelegate 
         recTimer?.invalidate(); recTimer = nil
         recT0 = nil
         guard let mic = micBtn else { return }
-        mic.setTitle(nil, for: .normal)
-        mic.tintColor = chipFgC
-        micWC?.constant = 34
-        recCancelBtn?.isHidden = true
+        if avatarOn {
+            recVisual(false)
+        } else {
+            mic.setTitle(nil, for: .normal)
+            mic.tintColor = chipFgC
+            micWC?.constant = 34
+            recCancelBtn?.isHidden = true
+        }
         card?.superview?.layoutIfNeeded()
+    }
+
+    /// 录音时的样子。普通样式:麦克风变红变宽 + 左边出 ×(照旧,只在录音中切样式时走这里);
+    /// 头像样式:语音圆变红,药丸左边红点 + 计时,× 占发送键的位;字先收起来,键盘也收(免得往看不见的框里打字)
+    func recVisual(_ on: Bool, animated: Bool = true) {
+        guard avatarOn else {
+            micBtn?.tintColor = on ? UIColor.systemRed : chipFgC
+            micBtn?.setTitle(on ? " 0:00" : nil, for: .normal)
+            micWC?.constant = on ? 78 : 34
+            recCancelBtn?.isHidden = !on
+            return
+        }
+        avVoiceBtn?.tintColor = on ? UIColor.systemRed : chipFgC
+        avRecDot?.isHidden = !on
+        avRecL?.isHidden = !on
+        if on {
+            let s = Int(Date().timeIntervalSince(recT0 ?? Date()))
+            avRecL?.text = String(format: "%d:%02d", s / 60, s % 60)
+            tv?.resignFirstResponder()
+        }
+        tv?.isHidden = on
+        recCancelBtn?.isHidden = !on
+        syncAvatarSend(animated: animated && !on)
     }
 
     func updateCardHeight() {
         guard let t = tv, let hC = cardHeightC else { return }
+        if avatarOn, let pillHC = avPillHC {
+            // 头像样式:药丸 = 托盘(附件条/引用条)+ 字,一行时字在 40 里上下正中;
+            // 卡片 = max(46, 药丸 + 3),最高还是 cardMaxH,再多就在框里滚
+            let chain = 6 + (attsHC?.constant ?? 0) + (quoteTopC?.constant ?? 0) + (quoteHC?.constant ?? 0)
+            let tray: CGFloat = (attsCount > 0 || quoteIsOn) ? chain + 5 : 0
+            let content = t.contentSize.height
+            let pad = max(0, (40 - content) / 2)
+            let pill = min(cardMaxH - 3, max(40, tray + content + pad * 2))
+            let sets: [(NSLayoutConstraint?, CGFloat)] = [
+                (tvTopC, tray + pad - chain), (avTvBotC, -pad), (pillHC, pill), (hC, max(46, pill + 3))]
+            var moved = false
+            for (c, v) in sets {
+                if let c, abs(c.constant - v) > 0.5 { c.constant = v; moved = true }
+            }
+            if moved { card?.superview?.layoutIfNeeded() }
+            t.scrollRangeToVisible(t.selectedRange)
+            return
+        }
         let trayH = (attsHC?.constant ?? 0) + (quoteTopC?.constant ?? 0)
                   + (quoteHC?.constant ?? 0) + (tvTopC?.constant ?? 0)
         let chrome: CGFloat = 6 + 2 + 8 + 34 + trayH
