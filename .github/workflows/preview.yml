@@ -12,6 +12,7 @@ env:
   LX_YAN: ${{ secrets.LX_YAN }}
   LX_ZHAO: ${{ secrets.LX_ZHAO }}
   LX_ZHAO2: ${{ secrets.LX_ZHAO2 }}
+  LX_TITLE: ${{ secrets.LX_TITLE }}
   LX_FONT_URL: ${{ secrets.LX_FONT_URL }}
   LX_SHOT_URL: ${{ secrets.LX_SHOT_URL }}
 
