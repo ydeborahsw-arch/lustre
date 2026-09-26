@@ -1022,6 +1022,11 @@ public class NativeInputPlugin: CAPPlugin, CAPBridgedPlugin, UITextViewDelegate 
     var recCancelBtn: UIButton?
     var micWC: NSLayoutConstraint?
     var chipFgC = UIColor(white: 0.82, alpha: 1)
+    var chipC = UIColor(white: 1, alpha: 0.09)
+    var avFgC = UIColor(white: 0.82, alpha: 1)
+    var cardDark = true
+    var themeTextC: UIColor?
+    var themePhC: UIColor?
     // 0926 头像模式输入栏:左语音圆 / 中间输入药丸 / 右胶囊(星芒+加号)。还是这一张 card,
     // 这些在建卡时一次建好、平时藏着,切样式只动 isHidden 和约束(新建玻璃会闪一帧)
     var avatarOn = false
@@ -1088,7 +1093,7 @@ public class NativeInputPlugin: CAPPlugin, CAPBridgedPlugin, UITextViewDelegate 
 
     func applyStyle(_ call: CAPPluginCall) {
         guard let t = tv else { return }
-        if let hex = call.getString("color"), let c = NativeInputPlugin.color(hex) { t.textColor = c }
+        if let hex = call.getString("color"), let c = NativeInputPlugin.color(hex) { themeTextC = c; t.textColor = c }
         // 0926 她:输入框的字跟聊天正文一样大(头像样式 14、普通样式 15,同一支字体连中文回退);光标跟着字高走
         t.font = LXBubbleCell.bubbleFont(avatarOn)
         let padTop = CGFloat(call.getFloat("padTop") ?? 9)
@@ -1098,6 +1103,7 @@ public class NativeInputPlugin: CAPPlugin, CAPBridgedPlugin, UITextViewDelegate 
         t.textContainerInset = UIEdgeInsets(top: padTop, left: padLeft,
                                             bottom: padBottom, right: padRight)
         layoutPlaceholder()
+        syncAvatarInk()
     }
     @objc func setStyle(_ call: CAPPluginCall) {
         DispatchQueue.main.async { self.applyStyle(call); call.resolve(["ok": true]) }
@@ -1590,6 +1596,7 @@ public class NativeInputPlugin: CAPPlugin, CAPBridgedPlugin, UITextViewDelegate 
         if rec { recVisual(false, animated: false) }
         avatarOn = on
         tv?.font = LXBubbleCell.bubbleFont(on)
+        syncAvatarInk()
         if on {
             savedShadowHidden = cardShadow?.isHidden ?? true
             savedBorderW = cardV.layer.borderWidth
@@ -1810,8 +1817,8 @@ public class NativeInputPlugin: CAPPlugin, CAPBridgedPlugin, UITextViewDelegate 
         }
         if let shex = call.getString("sendBg"), let sc = NativeInputPlugin.color(shex) { sendBtn?.backgroundColor = sc }
         if let sfhex = call.getString("sendFg"), let sfc = NativeInputPlugin.color(sfhex) { sendBtn?.tintColor = sfc }
-        if let chex = call.getString("color"), let cc = NativeInputPlugin.color(chex) { tv?.textColor = cc }
-        if let phex = call.getString("phColor"), let pc = NativeInputPlugin.color(phex) { phLabel?.textColor = pc }
+        if let chex = call.getString("color"), let cc = NativeInputPlugin.color(chex) { themeTextC = cc; tv?.textColor = cc }
+        if let phex = call.getString("phColor"), let pc = NativeInputPlugin.color(phex) { themePhC = pc; phLabel?.textColor = pc }
         if let mhex = call.getString("modelFg"), let mc = NativeInputPlugin.color(mhex) { modelFgC = mc }
         if let ehex = call.getString("effortFg"), let ec = NativeInputPlugin.color(ehex) { effortFgC = ec }
         if let ahex = call.getString("accent"), let ac = NativeInputPlugin.color(ahex) {
@@ -1841,23 +1848,45 @@ public class NativeInputPlugin: CAPPlugin, CAPBridgedPlugin, UITextViewDelegate 
             cardShadow?.layer.shadowOpacity = dark ? 0.30 : 0.07
             let chip = dark ? UIColor(white: 1, alpha: 0.09) : UIColor(white: 0, alpha: 0.06)
             let fg = dark ? UIColor(white: 0.82, alpha: 1) : UIColor(white: 0.32, alpha: 1)
-            chipFgC = fg
+            chipFgC = fg; chipC = chip; cardDark = dark
             for b in [plusBtn, recCancelBtn] { b?.backgroundColor = chip; b?.tintColor = fg }
             if let m = micBtn { m.backgroundColor = chip; if recorder == nil { m.tintColor = fg } }
             modelBtn?.backgroundColor = chip
-            // 头像样式:玻璃跟深浅走(同卡片),三颗图标和录音计时用同一支图标墨;录音中的语音圆保持星芒色
-            for g in [avVoiceG, avPillG, avCapG] {
-                if #available(iOS 26.0, *) { g?.overrideUserInterfaceStyle = dark ? .dark : .light }
-                else { g?.effect = UIBlurEffect(style: dark ? .systemThickMaterialDark : .systemThinMaterialLight) }
-            }
-            avModelBtn?.tintColor = NativeInputPlugin.starTint; avPlusBtn?.tintColor = fg; avRecL?.textColor = fg
-            if !(avatarOn && recorder != nil) { avVoiceBtn?.tintColor = fg }
+            // 头像样式三块玻璃和玻璃上的墨在 syncAvatarInk 里按壁纸定(函数末尾统一走一遍);星芒一直是星芒色
+            avModelBtn?.tintColor = NativeInputPlugin.starTint
             let want: UIKeyboardAppearance = dark ? .dark : .light
             if let t = tv, t.keyboardAppearance != want {
                 t.keyboardAppearance = want
                 if t.isFirstResponder { t.reloadInputViews() }
             }
         }
+        syncAvatarInk()
+    }
+
+    /// 0926 她选 A:头像样式三块玻璃的深浅按壁纸定,不按主题。液态玻璃小块会自己跟着背后翻深浅,大块不翻、只认这里的设定
+    /// (WWDC25)——按主题定的话,深色主题配浅壁纸,输入框长到第三行就从浅灰跳成深灰。没设自定义壁纸照主题
+    var avGlassDark: Bool { ChatListPlugin.wallLight.map { !$0 } ?? cardDark }
+    /// 玻璃跟主题不同深浅时(深色主题配浅壁纸、或反过来),框里的字、占位符、图标、录音的 × 换成那块玻璃配的墨:
+    /// 浅玻璃=浅壁纸上聊天字那支近黑 + 白天的占位符色;深玻璃=月夜那套。语音圆录音时照旧星芒色
+    func syncAvatarInk() {
+        let gd = avGlassDark
+        for g in [avVoiceG, avPillG, avCapG] {
+            if #available(iOS 26.0, *) { g?.overrideUserInterfaceStyle = gd ? .dark : .light }
+            else { g?.effect = UIBlurEffect(style: gd ? .systemThickMaterialDark : .systemThinMaterialLight) }
+        }
+        let fg = gd ? UIColor(white: 0.82, alpha: 1) : UIColor(white: 0.32, alpha: 1)
+        avFgC = fg
+        avPlusBtn?.tintColor = fg; avRecL?.textColor = fg
+        if !(avatarOn && recorder != nil) { avVoiceBtn?.tintColor = fg }
+        let swap = avatarOn && gd != cardDark
+        let text: UIColor? = !swap ? themeTextC : gd ? UIColor(red: 0xE3/255, green: 0xE2/255, blue: 0xE7/255, alpha: 1)
+                                                       : UIColor(red: 0x1D/255, green: 0x1D/255, blue: 0x1F/255, alpha: 1)
+        let ph: UIColor? = !swap ? themePhC : gd ? UIColor(red: 0x78/255, green: 0x85/255, blue: 0x9B/255, alpha: 1)
+                                                   : UIColor(red: 0x92/255, green: 0xA6/255, blue: 0xB8/255, alpha: 1)
+        if let c = text { tv?.textColor = c }
+        if let c = ph { phLabel?.textColor = c }
+        recCancelBtn?.backgroundColor = !avatarOn ? chipC : gd ? UIColor(white: 1, alpha: 0.09) : UIColor(white: 0, alpha: 0.06)
+        recCancelBtn?.tintColor = avatarOn ? fg : chipFgC
     }
 
     func micDeniedToast() {
@@ -2832,7 +2861,7 @@ public class NativeInputPlugin: CAPPlugin, CAPBridgedPlugin, UITextViewDelegate 
             recCancelBtn?.isHidden = !on
             return
         }
-        avVoiceBtn?.tintColor = on ? NativeInputPlugin.starTint : chipFgC
+        avVoiceBtn?.tintColor = on ? NativeInputPlugin.starTint : avFgC
         avRecDot?.backgroundColor = NativeInputPlugin.starTint
         avRecDot?.isHidden = !on
         avRecL?.isHidden = !on

@@ -1266,8 +1266,6 @@ final class LXBubbleView: UIView {
 enum LXSoftGlassStore {
     struct Ink { var fill: CGFloat; var top: CGFloat; var rim: CGFloat; var width: CGFloat; var shadow: CGFloat; var blur: CGFloat }
     static let changed = Notification.Name("lx.softGlass.changed")
-    /// 糊的滑杆值按 UIBlurEffect(.regular) 整块磨砂约 30 来折成比例;是相对的档,不是真 px
-    static let blurFull: CGFloat = 30
     static func defaults(_ light: Bool) -> Ink {
         light ? Ink(fill: 0.07, top: 0.5, rim: 1, width: 1, shadow: 0, blur: 0)
               : Ink(fill: 0.07, top: 0.13, rim: 0.13, width: 0.5, shadow: 0, blur: 0)
@@ -1306,8 +1304,7 @@ final class LXSoftGlassView: UIView {
     private let rimMask = CAShapeLayer()
     private var rimW: CGFloat = 1
     private var blurV: UIVisualEffectView?
-    private var blurAnim: UIViewPropertyAnimator?
-    private var blurFrac: CGFloat = 0
+    private var blurR: CGFloat = 0
     private let blurMask = LXPathMaskView()
     private var sig = ""
 
@@ -1332,16 +1329,11 @@ final class LXSoftGlassView: UIView {
         layer.shadowOffset = CGSize(width: 0, height: 4)
         layer.shadowRadius = 7
         NotificationCenter.default.addObserver(self, selector: #selector(inkChanged), name: LXSoftGlassStore.changed, object: nil)
-        NotificationCenter.default.addObserver(self, selector: #selector(backToFront),
-                                               name: UIApplication.willEnterForegroundNotification, object: nil)
         applyInk()
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
-    deinit { blurAnim?.stopAnimation(true) }
 
     @objc private func inkChanged() { applyInk() }
-    /// 从后台回来,停在半路的模糊动画可能被系统收尾成整块磨砂;按原来的量重新停一次
-    @objc private func backToFront() { if blurFrac > 0 { setBlur(blurFrac, force: true) } }
 
     private func applyInk() {
         let k = LXSoftGlassStore.get(light)
@@ -1356,40 +1348,40 @@ final class LXSoftGlassView: UIView {
         layer.shadowColor = (light ? UIColor(red: 20 / 255, green: 30 / 255, blue: 40 / 255, alpha: 1) : UIColor.black).cgColor
         layer.shadowOpacity = Float(k.shadow)
         CATransaction.commit()
-        blurV?.overrideUserInterfaceStyle = light ? .light : .dark
-        setBlur(k.blur / LXSoftGlassStore.blurFull, force: false)
+        setBlur(k.blur)
         sig = ""
         setNeedsLayout()
     }
 
-    private func setBlur(_ amount: CGFloat, force: Bool) {
-        let f = max(0, min(1, amount))
-        guard force || abs(f - blurFrac) > 0.0005 || (f > 0) != (blurV != nil) else { return }
-        blurFrac = f
-        blurAnim?.stopAnimation(true)
-        blurAnim = nil
-        guard f > 0 else {
+    /// 0926 她:糊底要定死在她拉的数。系统公开的模糊只有几档固定的整块磨砂;这里用系统内部的自定义模糊直接给半径
+    /// (点,跟网页小样 blur(px) 同一个数)。效果本身就是这个数,不靠停在半路的动画,滑出屏幕、回前台都不会变。
+    /// 不是公开接口:类名拆开拼,先问它认不认这个键再设;哪天系统里没了,就不糊,退回薄玻璃
+    private static func fixedBlur(_ r: CGFloat) -> UIVisualEffect? {
+        guard let cls = NSClassFromString(["_UI", "Custom", "Blur", "Effect"].joined()) as? NSObject.Type,
+              let fx = cls.init() as? UIVisualEffect,
+              fx.responds(to: NSSelectorFromString("setBlurRadius:")) else { return nil }
+        fx.setValue(r, forKey: "blurRadius")
+        if fx.responds(to: NSSelectorFromString("setScale:")) { fx.setValue(1.0, forKey: "scale") }
+        return fx
+    }
+
+    private func setBlur(_ r: CGFloat) {
+        guard r != blurR || (r > 0) != (blurV != nil) else { return }
+        blurR = r
+        guard r > 0, let fx = Self.fixedBlur(r) else {
             blurV?.removeFromSuperview()
             blurV = nil
             return
         }
-        let v: UIVisualEffectView
-        if let b = blurV { v = b } else {
-            v = UIVisualEffectView(effect: nil)
-            v.frame = bounds
-            v.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-            v.isUserInteractionEnabled = false
-            v.mask = blurMask
-            insertSubview(v, belowSubview: inkV)
-            blurV = v
-            sig = ""
-        }
-        v.overrideUserInterfaceStyle = light ? .light : .dark
-        v.effect = nil
-        let a = UIViewPropertyAnimator(duration: 1, curve: .linear) { [weak v] in v?.effect = UIBlurEffect(style: .regular) }
-        a.pausesOnCompletion = true
-        a.fractionComplete = f
-        blurAnim = a
+        if let v = blurV { v.effect = fx; return }
+        let v = UIVisualEffectView(effect: fx)
+        v.frame = bounds
+        v.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        v.isUserInteractionEnabled = false
+        v.mask = blurMask
+        insertSubview(v, belowSubview: inkV)
+        blurV = v
+        sig = ""
     }
 
     override func layoutSubviews() {
@@ -1600,9 +1592,9 @@ enum LXMoonPalette {
         return order[(i + 1) % order.count]
     }
     static let chat: [String: [String: Any]] = [
-        "day": ["bg": "#f6fbff", "me": "#c8d8e8", "meFg": "#2a3a4d", "aiFg": "#2a3a4d", "faint": "#92a6b8", "fn": "#92a6b8", "fnStar": "#b6d6e8", "think": "#93b2d2", "accent": "#618fbd", "thinkBody": "#769ec6", "accentFg": "#2a3a4d", "hairline": "#7a8c9e", "hairlineA": 0.22, "cardBg": "#fbfdff", "segTrack": "#eff3f6", "menuBg": "#f4f8fb", "fg": "#2a3a4d", "textSoft": "#64798d", "sliderThumb": "#618fbd", "sendBg": "#c8d8e8", "rowPress": "#ecf3f8", "sidePad": 16, "hdrBtnBg": "#fafcfe", "hdrBtnFg": "#2a3a4d", "hdrRing": "#ffffff", "hdrRingA": 0.95, "pillBg": "#fafcfe", "pillFg": "#93b2d2", "statusFs": 12],
+        "day": ["bg": "#f6fbff", "me": "#c8d8e8", "meFg": "#2a3a4d", "aiFg": "#2a3a4d", "faint": "#92a6b8", "fn": "#92a6b8", "fnStar": "#b6d6e8", "think": "#93b2d2", "accent": "#618fbd", "thinkBody": "#769ec6", "accentFg": "#2a3a4d", "hairline": "#7a8c9e", "hairlineA": 0.22, "cardBg": "#fbfdff", "segTrack": "#eff3f6", "menuBg": "#f4f8fb", "fg": "#2a3a4d", "textSoft": "#64798d", "sliderThumb": "#618fbd", "sendBg": "#d7eaf8", "rowPress": "#ecf3f8", "sidePad": 16, "hdrBtnBg": "#fafcfe", "hdrBtnFg": "#2a3a4d", "hdrRing": "#ffffff", "hdrRingA": 0.95, "pillBg": "#fafcfe", "pillFg": "#93b2d2", "statusFs": 12],   // 0926 她:Home 小输入框的发送键跟月夜同一支 #D7EAF8
         "half": ["bg": "#191917", "me": "#111110", "meFg": "#e9e5dc", "aiFg": "#e9e5dc", "faint": "#6e6b64", "fn": "#a5a198", "fnStar": "#d97757", "think": "#a5a198", "accent": "#da7a55", "thinkBody": "#8b8880", "accentFg": "#191917", "hairline": "#ffffff", "hairlineA": 0.08, "cardBg": "#21211f", "segTrack": "#373735", "menuBg": "#202020", "fg": "#e9e5dc", "textSoft": "#a5a198", "sliderThumb": "#da7a55", "sendBg": "#e9e5dc", "rowPress": "#232525", "sidePad": 16, "hdrBtnBg": "#242422", "hdrBtnFg": "#e9e5dc", "hdrRing": "#e9e5dc", "hdrRingA": 0.18, "pillBg": "#242422", "pillFg": "#a5a198", "statusFs": 12],
-        "moon": ["bg": "#000000", "me": "#26252a", "meFg": "#ffffff", "aiFg": "#f5f5f5", "faint": "#717e97", "fn": "#d7eaf8", "fnStar": "#b6d6e8", "think": "#d7eaf8", "accent": "#a9d9ee", "thinkBody": "#b0b0b0", "accentFg": "#05070b", "hairline": "#dfe3ee", "hairlineA": 0.1, "cardBg": "#26252a", "segTrack": "#39383e", "menuBg": "#000000", "fg": "#f5f5f5", "textSoft": "#a5b0c6", "sliderThumb": "#b6d6e8", "sendBg": "#b6d6e8", "rowPress": "#0d0e10", "sidePad": 16, "hdrBtnBg": "#121212", "hdrBtnFg": "#d7eaf8", "hdrRing": "#d6dbea", "hdrRingA": 0.18, "pillBg": "#121212", "pillFg": "#d7eaf8", "statusFs": 12],
+        "moon": ["bg": "#000000", "me": "#26252a", "meFg": "#ffffff", "aiFg": "#f5f5f5", "faint": "#717e97", "fn": "#d7eaf8", "fnStar": "#b6d6e8", "think": "#d7eaf8", "accent": "#a9d9ee", "thinkBody": "#b0b0b0", "accentFg": "#05070b", "hairline": "#dfe3ee", "hairlineA": 0.1, "cardBg": "#26252a", "segTrack": "#39383e", "menuBg": "#000000", "fg": "#f5f5f5", "textSoft": "#a5b0c6", "sliderThumb": "#b6d6e8", "sendBg": "#d7eaf8", "rowPress": "#0d0e10", "sidePad": 16, "hdrBtnBg": "#121212", "hdrBtnFg": "#d7eaf8", "hdrRing": "#d6dbea", "hdrRingA": 0.18, "pillBg": "#121212", "pillFg": "#d7eaf8", "statusFs": 12],   // 0926 她:只有星芒图案用星芒色,发送键 #D7EAF8
     ]
     static let card: [String: [String: Any]] = [
         "day": ["bg": "#fafcfe", "bgAlpha": 0.86, "border": "#ffffff", "borderAlpha": 0.95, "sendBg": "#D7EAF8", "sendFg": "#05070B", "color": "#2A3A4D", "kbDark": false, "phColor": "#92a6b8", "modelFg": "#2a3a4d", "effortFg": "#64798d", "accent": "#618FBD", "quoteBg": "#fafcfe", "quoteBgA": 0.92, "quoteLine": "#9eafbc", "quoteLineA": 0.16, "textSoft": "#64798D", "textFaint": "#92A6B8"],   // 0926 她:白天发送键跟月夜一模一样
@@ -5532,6 +5524,7 @@ public class ChatListPlugin: CAPPlugin, CAPBridgedPlugin, UITableViewDataSource,
         }
         scrimV?.set(color: color, alphas: alphas, locations: [0, 0.30, 0.68, 1])
         adaptTextToWall(img)
+        NativeInputPlugin.live?.syncAvatarInk()
     }
 
     private static var lumCache: (ObjectIdentifier, CGFloat)?
@@ -5551,6 +5544,9 @@ public class ChatListPlugin: CAPPlugin, CAPBridgedPlugin, UITableViewDataSource,
         lumCache = (ObjectIdentifier(img), l)
         return l
     }
+
+    /// 自定义壁纸是不是浅的:跟聊天字变深同一个判断(中间那块平均亮度 > 0.55);没设自定义壁纸 = nil
+    static var wallLight: Bool? { LXWallStore.image.flatMap { luminance($0) }.map { $0 > 0.55 } }
 
     func adaptTextToWall(_ img: UIImage?) {
         let pal = LXMoonPalette.chat[RPSpec.moonState] ?? [:]
@@ -5604,6 +5600,21 @@ public class ChatListPlugin: CAPPlugin, CAPBridgedPlugin, UITableViewDataSource,
         let page = LXBubbleSampler(frame: win.bounds)
         page.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         win.addSubview(page)
+        // 0926 糊底定死验一遍:6 秒后两套 Blur 都调到 6,14 秒、22 秒各把整页摘下窗口 0.5 秒再放回
+        // (等于气泡滑出屏幕再回来)。记号旁边的小方块报第几步:蓝=调好、绿=放回一次、黄=放回两次
+        let phase = UIView(frame: CGRect(x: 28, y: 70, width: 20, height: 20))
+        page.addSubview(phase)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 6) {
+            for light in [true, false] { var k = LXSoftGlassStore.get(light); k.blur = 6; LXSoftGlassStore.set(k, light: light) }
+            phase.backgroundColor = .blue
+        }
+        for (at, color) in [(14.0, UIColor.green), (22.0, UIColor.yellow)] {
+            DispatchQueue.main.asyncAfter(deadline: .now() + at) { [weak page] in
+                guard let p = page else { return }
+                p.removeFromSuperview()
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { win.addSubview(p); phase.backgroundColor = color }
+            }
+        }
         Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self, weak page] tm in
             guard let s = self, let p = page else { tm.invalidate(); return }
             s.table?.isHidden = true
@@ -5645,6 +5656,33 @@ public class ChatListPlugin: CAPPlugin, CAPBridgedPlugin, UITableViewDataSource,
         DispatchQueue.main.asyncAfter(deadline: .now() + 63) { [weak self] in self?.switchMoon("day") }
         DispatchQueue.main.asyncAfter(deadline: .now() + 72) {
             NativeInputPlugin.live?.previewComposer(text: "Preview")
+        }
+        // 0926 她选 A:深色主题配浅壁纸,输入框长到三行也不该变深灰。85 秒换一张浅色测试壁纸(只在内存里)、回月夜,
+        // 空栏;95 秒一行字;105 秒三行字
+        DispatchQueue.main.asyncAfter(deadline: .now() + 85) { [weak self] in
+            guard let s = self else { return }
+            LXWallStore.image = Self.previewLightWall(s.container?.bounds.size ?? CGSize(width: 402, height: 874))
+            s.switchMoon("moon")
+            NativeInputPlugin.live?.previewComposer(text: "")
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 95) {
+            NativeInputPlugin.live?.previewComposer(text: "Preview")
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 105) {
+            NativeInputPlugin.live?.previewComposer(text: "Preview\nSecond line\nThird line")
+        }
+    }
+
+    private static func previewLightWall(_ size: CGSize) -> UIImage {
+        UIGraphicsImageRenderer(size: size).image { ctx in
+            UIColor(red: 0.91, green: 0.94, blue: 0.96, alpha: 1).setFill()
+            ctx.fill(CGRect(origin: .zero, size: size))
+            let p = UIBezierPath()
+            var x = -size.height
+            while x < size.width { p.move(to: CGPoint(x: x, y: size.height)); p.addLine(to: CGPoint(x: x + size.height, y: 0)); x += 18 }
+            UIColor(red: 0.78, green: 0.83, blue: 0.88, alpha: 1).setStroke()
+            p.lineWidth = 2
+            p.stroke()
         }
     }
 
