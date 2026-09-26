@@ -56,6 +56,8 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
             HealthWatch.note("launch", HealthWatch.envTag())
             HealthWatch.shared.start()
         }
+        // 0926:capacitor.config.json 里关了 ios.handleApplicationNotifications。不关的话 Capacitor 的桥一搭好就把这个位子
+        // 换成它自己的通知路由(没装推送插件=点通知什么也不做),下面点通知进对话那段从来没被叫到过
         UNUserNotificationCenter.current().delegate = self
         // 0925 备注:开机拉一次;改了就刷抽屉标题和聊天里的名字
         LXNick.refresh()
@@ -138,12 +140,9 @@ extension AppDelegate: UNUserNotificationCenterDelegate {
         let lx = content.userInfo["lx"] as? [String: Any]
         let tapped = response.actionIdentifier == UNNotificationDefaultActionIdentifier
         let run: () -> Void = {
-            // 0926:点通知先切到那条消息的窗,再喂背来的消息——消息落进切过去的那一窗
+            // 0926:点通知只切到那条消息的窗。背来的那份不喂进聊天:它只有前 1500 字、meta 只剩会话,按 id 合并会把
+            // 屏幕上/缓存里的全文换成这份残本;消息照常由回前台的补拉带回来
             if tapped { LXPushRoute.open(lx, thread: content.threadIdentifier) }
-            if let lx {
-                AppDelegate.pendingPush = lx
-                NotificationCenter.default.post(name: Notification.Name("lx.push.message"), object: nil, userInfo: lx)
-            }
         }
         if Thread.isMainThread { run() } else { DispatchQueue.main.async(execute: run) }
         completionHandler()
@@ -153,11 +152,8 @@ extension AppDelegate: UNUserNotificationCenterDelegate {
                                 willPresent notification: UNNotification,
                                 withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
         AppDelegate.clearIconBadge()
-        if #available(iOS 14.0, *) {
-            completionHandler([.banner, .sound])
-        } else {
-            completionHandler([.alert, .sound])
-        }
+        // App 开着时不弹横幅:她一直是这样用的(之前这个位子被 Capacitor 占着,它在前台一律不弹)
+        completionHandler([])
     }
 }
 

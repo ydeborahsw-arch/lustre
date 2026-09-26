@@ -1,6 +1,7 @@
 import Foundation
 import Capacitor
 import UIKit
+import CoreText
 import LocalAuthentication
 import UserNotifications
 import BackgroundTasks
@@ -2047,7 +2048,16 @@ public class NativeInputPlugin: CAPPlugin, CAPBridgedPlugin, UITextViewDelegate 
         guard let t = tv, let l = phLabel else { return }
         l.font = t.font
         l.sizeToFit()
-        l.frame.origin = CGPoint(x: t.textContainerInset.left, y: t.textContainerInset.top)
+        var y = t.textContainerInset.top
+        // 0926 她:占位符上下留白要视觉上一致。头像样式框一行高时,这一行的行框正好在框的正中,但 "Message" 的墨迹
+        // (M 顶到 g 底)比行框中线低约 2pt。按字形实际外框把墨迹中线对到行框中线;打出来的字不动
+        if avatarOn, let f = l.font, let s = l.text, !s.isEmpty {
+            let ink = CTLineGetBoundsWithOptions(
+                CTLineCreateWithAttributedString(NSAttributedString(string: s, attributes: [.font: f])),
+                .useGlyphPathBounds)
+            y += f.lineHeight / 2 - f.ascender + ink.midY
+        }
+        l.frame.origin = CGPoint(x: t.textContainerInset.left, y: y)
         if card != nil, !cardV_suspended() { l.isHidden = !(t.text ?? "").isEmpty }
     }
     func cardV_suspended() -> Bool { return card?.isHidden ?? true }
