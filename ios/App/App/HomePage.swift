@@ -19,6 +19,8 @@ struct HomeTheme {
     var textFaint = UIColor(white: 0.55, alpha: 1)
     var accent = UIColor(red: 0.714, green: 0.839, blue: 0.910, alpha: 1)
     var accentFg = UIColor.black
+    /// 0926 她:白天的蓝字换灰(调色板 accentText);没给就跟 accent 一样
+    var accentText = UIColor(red: 0.714, green: 0.839, blue: 0.910, alpha: 1)
     var cardBg = UIColor(white: 0.10, alpha: 1)
     var hairline = UIColor(white: 1, alpha: 0.09)
     var segTrack = UIColor(white: 0.16, alpha: 1)
@@ -41,7 +43,7 @@ struct HomeTheme {
                        blue: CGFloat(n & 255) / 255, alpha: a)
     }
 
-    static let themeKeys = ["bg", "fg", "textSoft", "faint", "accent", "accentFg", "cardBg",
+    static let themeKeys = ["bg", "fg", "textSoft", "faint", "accent", "accentFg", "accentText", "cardBg",
                             "hairline", "hairlineA", "segTrack", "sliderThumb", "sendBg",
                             "rowPress", "sidePad"]
     static func snapshot(_ call: CAPPluginCall) -> [String: Any] {
@@ -59,6 +61,7 @@ struct HomeTheme {
         t.textSoft = col(S("textSoft"), t.textSoft)
         t.textFaint = col(S("faint"), t.textFaint)
         t.accent = col(S("accent"), t.accent)
+        t.accentText = col(S("accentText"), t.accent)
         t.accentFg = col(S("accentFg"), t.accentFg)
         t.cardBg = col(S("cardBg"), t.cardBg)
         if let h = S("hairline") {
@@ -725,7 +728,7 @@ final class HVCard: HomeCard {
         let lab = UILabel()
         lab.text = label
         lab.font = LXDrawerTint.font(10.5, wght: i == selIdx ? 700 : 400)
-        lab.textColor = i == selIdx ? theme.accent : theme.textFaint
+        lab.textColor = i == selIdx ? theme.accentText : theme.textFaint
         lab.textAlignment = .center
         lab.isUserInteractionEnabled = false
         [colV, fill, lab].forEach { $0.translatesAutoresizingMaskIntoConstraints = false }
@@ -808,7 +811,7 @@ final class HVCard: HomeCard {
                 attributes: [.font: LXDrawerTint.font(11), .foregroundColor: theme.textSoft]))
             if delta > 0 {
                 m.append(NSAttributedString(string: " ▲",
-                    attributes: [.font: LXDrawerTint.font(11), .foregroundColor: theme.accent]))
+                    attributes: [.font: LXDrawerTint.font(11), .foregroundColor: theme.accentText]))
             } else if delta < 0 {
                 m.append(NSAttributedString(string: " ▼",
                     attributes: [.font: LXDrawerTint.font(11), .foregroundColor: theme.textFaint]))
@@ -1068,7 +1071,7 @@ final class HCCard: HomeCard {
         b.isEnabled = has
         b.setTitle("\(d)", for: .normal)
         b.titleLabel?.font = LXDrawerTint.font(13, wght: (has || sel) ? (sel ? 700 : 600) : 400)
-        b.setTitleColor(sel ? theme.accent : (has ? theme.text : theme.textFaint), for: .normal)
+        b.setTitleColor(sel ? theme.accentText : (has ? theme.text : theme.textFaint), for: .normal)
         b.layer.cornerRadius = 13.5
         b.pressColor = theme.rowPress
         if today {
@@ -1142,7 +1145,7 @@ final class HCCard: HomeCard {
                 let sel = b.iso == selIso
                 let has = b.isEnabled
                 b.titleLabel?.font = LXDrawerTint.font(13, wght: (has || sel) ? (sel ? 700 : 600) : 400)
-                b.setTitleColor(sel ? theme.accent : (has ? theme.text : theme.textFaint), for: .normal)
+                b.setTitleColor(sel ? theme.accentText : (has ? theme.text : theme.textFaint), for: .normal)
             }
         }
     }
@@ -2561,18 +2564,30 @@ struct RPTint {
 }
 enum RPSpec {
     static var moonState: String = UserDefaults.standard.string(forKey: "lx.rp.moon") ?? "moon" {
-        didSet { UserDefaults.standard.set(moonState, forKey: "lx.rp.moon") }
+        didSet { UserDefaults.standard.set(moonState, forKey: "lx.rp.moon"); applyWindowStyle() }
+    }
+    /// 0926 她:白天模式里粘贴/填充那种系统小胶囊还是黑的 → 整个 App 的系统件(系统菜单、没单独定深浅的玻璃)
+    /// 跟着月相走,不跟手机的深色模式:白天浅,半月/全月深
+    static var windowStyle: UIUserInterfaceStyle { moonState == "day" ? .light : .dark }
+    static func applyWindowStyle() {
+        let st = windowStyle
+        for sc in UIApplication.shared.connectedScenes {
+            for w in (sc as? UIWindowScene)?.windows ?? [] where w.overrideUserInterfaceStyle != st {
+                w.overrideUserInterfaceStyle = st
+            }
+        }
     }
     static let tints: [String: RPTint] = [
         "day": RPTint(
             page: UIColor(red: 0xE9/255, green: 0xF2/255, blue: 0xFB/255, alpha: 1),
             card: UIColor(white: 1, alpha: 0.58),
             cardBorder: UIColor(red: 122/255, green: 140/255, blue: 158/255, alpha: 0.22),
-            text: UIColor(red: 0x2A/255, green: 0x3A/255, blue: 0x4D/255, alpha: 1),
-            faint: UIColor(red: 0x64/255, green: 0x79/255, blue: 0x8D/255, alpha: 1),
-            fainter: UIColor(red: 0x92/255, green: 0xA6/255, blue: 0xB8/255, alpha: 1),
-            icon: UIColor(red: 0x61/255, green: 0x8F/255, blue: 0xBD/255, alpha: 1),
-            fill: UIColor(red: 0x61/255, green: 0x8F/255, blue: 0xBD/255, alpha: 1),
+            // 0926 她:白天正文黑、灰蓝小字换纯灰、蓝换星芒
+            text: UIColor(red: 0x1D/255, green: 0x1D/255, blue: 0x1F/255, alpha: 1),
+            faint: UIColor(red: 0x6E/255, green: 0x6E/255, blue: 0x73/255, alpha: 1),
+            fainter: UIColor(red: 0x9A/255, green: 0x9A/255, blue: 0xA0/255, alpha: 1),
+            icon: UIColor(red: 0xB6/255, green: 0xD6/255, blue: 0xE8/255, alpha: 1),
+            fill: UIColor(red: 0xB6/255, green: 0xD6/255, blue: 0xE8/255, alpha: 1),
             track: UIColor(red: 143/255, green: 162/255, blue: 176/255, alpha: 0.28),
             statBg: UIColor(red: 140/255, green: 160/255, blue: 176/255, alpha: 0.11),
             press: UIColor(white: 0, alpha: 0.06),
@@ -2881,9 +2896,29 @@ final class RPanelView: UIView {
     }
     required init?(coder: NSCoder) { fatalError() }
 
+    /// 0926 她:"右边这几张卡跟死了一样……做成 home 页原生卡片那种边缘亮亮的玻璃质感" → 跟 Home 卡同一套:
+    /// 液态玻璃(着一层卡片色 18%)、深浅照月相、圆角 18、不要边框和阴影(白天月夜都换);iOS 26 以下照旧
     private func card() -> UIView {
         let v = UIView()
         v.translatesAutoresizingMaskIntoConstraints = false
+        if #available(iOS 26.0, *) {
+            let g = UIGlassEffect()
+            g.tintColor = RPSpec.card.withAlphaComponent(0.18)
+            let glass = UIVisualEffectView(effect: g)
+            glass.overrideUserInterfaceStyle = RPSpec.moonState == "day" ? .light : .dark
+            glass.cornerConfiguration = .uniformCorners(radius: .fixed(18))
+            glass.translatesAutoresizingMaskIntoConstraints = false
+            glass.isUserInteractionEnabled = false
+            v.addSubview(glass)
+            NSLayoutConstraint.activate([
+                glass.topAnchor.constraint(equalTo: v.topAnchor), glass.bottomAnchor.constraint(equalTo: v.bottomAnchor),
+                glass.leadingAnchor.constraint(equalTo: v.leadingAnchor), glass.trailingAnchor.constraint(equalTo: v.trailingAnchor),
+            ])
+            v.backgroundColor = .clear
+            v.layer.cornerRadius = 18
+            v.layer.cornerCurve = .continuous
+            return v
+        }
         v.backgroundColor = RPSpec.card
         v.layer.cornerRadius = 18
         v.layer.borderWidth = 1

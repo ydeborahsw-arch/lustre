@@ -245,13 +245,21 @@ final class LXToast: UIView {
         super.init(frame: .zero)
         translatesAutoresizingMaskIntoConstraints = false
         isUserInteractionEnabled = false
-        backgroundColor = UIColor(white: 0.04, alpha: 0.95)
+        // 0926 她:这种提示白天也不要黑的 → 白天浅底深字,一点点影子托起来;月夜/半月照旧
+        let day = !LXSheetInk.dark
+        backgroundColor = day ? UIColor(white: 1, alpha: 0.96) : UIColor(white: 0.04, alpha: 0.95)
         layer.cornerRadius = 14
         layer.cornerCurve = .continuous
+        if day {
+            layer.shadowColor = UIColor.black.cgColor
+            layer.shadowOpacity = 0.12
+            layer.shadowRadius = 12
+            layer.shadowOffset = CGSize(width: 0, height: 4)
+        }
         let l = UILabel()
         l.translatesAutoresizingMaskIntoConstraints = false
         l.text = text
-        l.textColor = .white
+        l.textColor = day ? UIColor(red: 0x1D/255, green: 0x1D/255, blue: 0x1F/255, alpha: 1) : .white
         l.font = LXBubbleCell.bodyFont().withSize(14)
         l.numberOfLines = 3
         l.textAlignment = .center

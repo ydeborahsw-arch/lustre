@@ -62,17 +62,20 @@ enum LXSheetInk {
     }
     private static var m: String { RPSpec.moonState }
     static var dark: Bool { m != "day" }
-    static var text: UIColor { m == "day" ? hex(0x2A3A4D) : m == "half" ? hex(0xE9E5DC) : UIColor(white: 0.95, alpha: 1) }
-    static var icon: UIColor { m == "day" ? hex(0x2A3A4D) : m == "half" ? hex(0xE9E5DC) : UIColor(white: 0.9, alpha: 1) }
-    static var soft: UIColor { m == "day" ? hex(0x64798D) : m == "half" ? hex(0xA5A198) : UIColor(red: 0.55, green: 0.6, blue: 0.7, alpha: 1) }
-    static var faint: UIColor { m == "day" ? hex(0x92A6B8) : m == "half" ? hex(0x6E6B64) : UIColor(red: 0.47, green: 0.52, blue: 0.61, alpha: 1) }
+    // 0926 她:白天正文黑,灰蓝小字换纯灰
+    static var text: UIColor { m == "day" ? hex(0x1D1D1F) : m == "half" ? hex(0xE9E5DC) : UIColor(white: 0.95, alpha: 1) }
+    static var icon: UIColor { m == "day" ? hex(0x1D1D1F) : m == "half" ? hex(0xE9E5DC) : UIColor(white: 0.9, alpha: 1) }
+    static var soft: UIColor { m == "day" ? hex(0x6E6E73) : m == "half" ? hex(0xA5A198) : UIColor(red: 0.55, green: 0.6, blue: 0.7, alpha: 1) }
+    static var faint: UIColor { m == "day" ? hex(0x9A9AA0) : m == "half" ? hex(0x6E6B64) : UIColor(red: 0.47, green: 0.52, blue: 0.61, alpha: 1) }
     static var sep: UIColor { m == "day" ? hex(0x7A8C9E, 0.22) : UIColor(white: 1, alpha: m == "half" ? 0.08 : 0.10) }
     static var chip: UIColor { m == "day" ? UIColor(white: 0, alpha: 0.06) : UIColor(white: 1, alpha: 0.08) }
     static var track: UIColor { m == "day" ? UIColor(white: 0, alpha: 0.08) : UIColor(white: 1, alpha: 0.13) }
     static var tile: UIColor { m == "day" ? hex(0xFFFFFF, 0.9) : m == "half" ? hex(0x262624) : UIColor(red: 0.118, green: 0.118, blue: 0.125, alpha: 1) }
     // 0926 她:白天和月夜同一支浅蓝,只有半月是橙
     static var star: UIColor { m == "half" ? hex(0xD97757) : hex(0xB6D6E8) }
-    static var tint: UIColor { m == "day" ? hex(0xF4F8FB, 0.72) : m == "half" ? hex(0x191917, 0.62) : UIColor(red: 0.043, green: 0.043, blue: 0.047, alpha: 0.62) }
+    // 0926 她:白天思考卡、各种底部升起的小卡"厚厚的但是有一种透的感觉,跟深色那种一个参数,但是是白色"
+    // → 白天跟月夜同一个厚度 0.62,颜色换纯白(所有用这层底的卡一起变)
+    static var tint: UIColor { m == "day" ? hex(0xFFFFFF, 0.62) : m == "half" ? hex(0x191917, 0.62) : UIColor(red: 0.043, green: 0.043, blue: 0.047, alpha: 0.62) }
 }
 
 final class LXCardSheet: UIView {
@@ -1822,7 +1825,7 @@ public class NativeInputPlugin: CAPPlugin, CAPBridgedPlugin, UITextViewDelegate 
         if let ehex = call.getString("effortFg"), let ec = NativeInputPlugin.color(ehex) { effortFgC = ec }
         if let ahex = call.getString("accent"), let ac = NativeInputPlugin.color(ahex) {
             quoteAccentV?.backgroundColor = ac
-            quoteNameL?.textColor = ac
+            quoteNameL?.textColor = call.getString("accentText").flatMap { NativeInputPlugin.color($0) } ?? ac
             accentC = ac
         }
         if let qhex = call.getString("quoteBg"), let qc = NativeInputPlugin.color(qhex) {
@@ -1884,7 +1887,7 @@ public class NativeInputPlugin: CAPPlugin, CAPBridgedPlugin, UITextViewDelegate 
         let text: UIColor? = !swap ? themeTextC : gd ? UIColor(red: 0xE3/255, green: 0xE2/255, blue: 0xE7/255, alpha: 1)
                                                        : UIColor(red: 0x1D/255, green: 0x1D/255, blue: 0x1F/255, alpha: 1)
         let ph: UIColor? = !swap ? themePhC : gd ? UIColor(red: 0x78/255, green: 0x85/255, blue: 0x9B/255, alpha: 1)
-                                                   : UIColor(red: 0x92/255, green: 0xA6/255, blue: 0xB8/255, alpha: 1)
+                                                   : UIColor(red: 0x9A/255, green: 0x9A/255, blue: 0xA0/255, alpha: 1)
         if let c = text { tv?.textColor = c }
         if let c = ph { phLabel?.textColor = c }
     }
@@ -2076,16 +2079,17 @@ public class NativeInputPlugin: CAPPlugin, CAPBridgedPlugin, UITextViewDelegate 
     }
     func layoutPlaceholder() {
         guard let t = tv, let l = phLabel else { return }
-        l.font = t.font
+        // 0926 她:"只有占位符字体变大,正文其他都不变" → 头像样式的 Message 用 16,框里打出来的字还是 14
+        l.font = avatarOn ? LXBubbleCell.bodyFont(size: 16) : t.font
         l.sizeToFit()
         var y = t.textContainerInset.top
         // 0926 她:占位符上下留白要视觉上一致。头像样式框一行高时,这一行的行框正好在框的正中,但 "Message" 的墨迹
         // (M 顶到 g 底)比行框中线低约 2pt。按字形实际外框把墨迹中线对到行框中线;打出来的字不动
-        if avatarOn, let f = l.font, let s = l.text, !s.isEmpty {
+        if avatarOn, let f = l.font, let tf = t.font, let s = l.text, !s.isEmpty {
             let ink = CTLineGetBoundsWithOptions(
                 CTLineCreateWithAttributedString(NSAttributedString(string: s, attributes: [.font: f])),
                 .useGlyphPathBounds)
-            y += f.lineHeight / 2 - f.ascender + ink.midY
+            y += tf.lineHeight / 2 - f.ascender + ink.midY   // 行框按打字的字号,墨迹按占位符的字号
         }
         l.frame.origin = CGPoint(x: t.textContainerInset.left, y: y)
         if card != nil, !cardV_suspended() { l.isHidden = !(t.text ?? "").isEmpty }
@@ -2300,6 +2304,7 @@ public class NativeInputPlugin: CAPPlugin, CAPBridgedPlugin, UITextViewDelegate 
         if #available(iOS 26.0, *) { blurFx = UIGlassEffect() }
         else { blurFx = UIBlurEffect(style: .systemThickMaterialDark) }
         let blur = UIVisualEffectView(effect: blurFx)
+        blur.overrideUserInterfaceStyle = LXSheetInk.dark ? .dark : .light
         blur.translatesAutoresizingMaskIntoConstraints = false
         panel.addSubview(blur)
         let col = UIStackView()
@@ -2715,6 +2720,7 @@ public class NativeInputPlugin: CAPPlugin, CAPBridgedPlugin, UITextViewDelegate 
         if #available(iOS 26.0, *) { blurFx = UIGlassEffect() }
         else { blurFx = UIBlurEffect(style: .systemThickMaterialDark) }
         let blur = UIVisualEffectView(effect: blurFx)
+        blur.overrideUserInterfaceStyle = LXSheetInk.dark ? .dark : .light
         blur.translatesAutoresizingMaskIntoConstraints = false
         panel.addSubview(blur)
         let col = UIStackView()

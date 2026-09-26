@@ -24,7 +24,9 @@ class MyViewController: CAPBridgeViewController {
         bridge?.registerPluginInstance(DrawerPlugin())
         bridge?.registerPluginInstance(SysPlugin())
         bridge?.registerPluginInstance(CallKitPlugin())
-        if LustreConfig.webless, (UserDefaults.standard.dictionary(forKey: HomePlugin.themeCacheKey) ?? [:]).isEmpty {
+        // 0926 每次开机都把当前月相的调色板写进 Home 缓存(以前只在缓存空的时候写:
+        // 新包改了颜色,Home 要等切一次月相才跟上)
+        if LustreConfig.webless {
             LXMoonPalette.persist(RPSpec.moonState)
         }
         if let host = view {

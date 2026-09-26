@@ -215,15 +215,16 @@ struct LXDrawerTint {
         UIColor(red: CGFloat((v >> 16) & 0xFF) / 255, green: CGFloat((v >> 8) & 0xFF) / 255, blue: CGFloat(v & 0xFF) / 255, alpha: a)
     }
     static let tints: [String: LXDrawerTint] = [
+        // 0926 她:白天的蓝按深浅换星芒 / 亮蓝,正文黑,灰蓝小字换纯灰;淡蓝的底不动
         "day": LXDrawerTint(
             wall: [hex(0xF6FBFF), hex(0xE2F2FF), hex(0xDEEAF6), hex(0xD9E7F5)], wallStops: [0, 0.42, 0.74, 1],
-            text: hex(0x2A3A4D), soft: hex(0x64798D), faint: hex(0x92A6B8),
+            text: hex(0x1D1D1F), soft: hex(0x6E6E73), faint: hex(0x9A9AA0),
             hairline: UIColor(red: 122/255, green: 140/255, blue: 158/255, alpha: 0.22),
             segTrack: UIColor(red: 140/255, green: 160/255, blue: 176/255, alpha: 0.11),
-            cardBg: UIColor(white: 1, alpha: 0.58), composerBg: hex(0xF4F8FB), accent: hex(0x618FBD),
+            cardBg: UIColor(white: 1, alpha: 0.58), composerBg: hex(0xF4F8FB), accent: hex(0xB6D6E8),
             bg: hex(0xE9F2FB), cardLine: UIColor(red: 150/255, green: 168/255, blue: 182/255, alpha: 0.12),
-            pillBg: hex(0xC8D8E8), pillFg: hex(0x2A3A4D),
-            title: hex(0x2A3A4D), icon: hex(0x64798D),
+            pillBg: hex(0xB6D6E8), pillFg: hex(0x1D1D1F),
+            title: hex(0x1D1D1F), icon: hex(0x6E6E73),
             shadow: UIColor(red: 74/255, green: 93/255, blue: 108/255, alpha: 0.10), popShadowA: 0.14),
         "half": LXDrawerTint(
             wall: [hex(0x1B1B19), hex(0x1B1B19)], wallStops: [0, 1],

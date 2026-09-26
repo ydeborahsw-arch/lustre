@@ -65,6 +65,11 @@ struct LXChatTheme {
     var fnStar = UIColor(red: 0.714, green: 0.839, blue: 0.910, alpha: 1)
     var think = UIColor(red: 0.843, green: 0.918, blue: 0.973, alpha: 1)
     var accent = UIColor(red: 0.663, green: 0.851, blue: 0.933, alpha: 1)
+    /// 0926 她:白天的蓝全换成星芒色,可星芒色当字在白底上看不清 → 原来用 accent/think 着色的字,白天另给一支灰(调色板 accentText/thinkText);没给就跟原色
+    var accentTextC: UIColor?
+    var thinkTextC: UIColor?
+    var accentText: UIColor { accentTextC ?? accent }
+    var thinkText: UIColor { thinkTextC ?? think }
     var avatars = false
     var thinkBody = UIColor(white: 0.69, alpha: 1)
     var hdrBtnBg = UIColor(white: 0x12/255, alpha: 1)
@@ -91,7 +96,8 @@ struct LXChatTheme {
 
     mutating func loadCached(_ moon: String) {
         if let p = LXMoonPalette.chat[moon] { take(p) }
-        if let data = UserDefaults.standard.data(forKey: Self.cacheKey(moon)),
+        // 没有网页以后调色板就是唯一的准:网页年代存下的旧主题不再往上盖(否则这里改的颜色到她手机上会被旧值顶掉)
+        if !LustreConfig.webless, let data = UserDefaults.standard.data(forKey: Self.cacheKey(moon)),
            let d = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] { take(d) }
         fnStar = Self.star(moon)
     }
@@ -129,6 +135,8 @@ struct LXChatTheme {
         // fnStar 不从这里取:按月相定死,见 star(_:)
         if let v = str("think"), let c = NativeInputPlugin.color(v) { think = c }
         if let v = str("accent"), let c = NativeInputPlugin.color(v) { accent = c }
+        if let v = str("accentText"), let c = NativeInputPlugin.color(v) { accentTextC = c }
+        if let v = str("thinkText"), let c = NativeInputPlugin.color(v) { thinkTextC = c }
         if let v = str("thinkBody"), let c = NativeInputPlugin.color(v) { thinkBody = c }
         if let v = str("hdrBtnBg"), let c = NativeInputPlugin.color(v) { hdrBtnBg = c }
         if let v = str("hdrBtnFg"), let c = NativeInputPlugin.color(v) { hdrBtnFg = c }
@@ -1625,12 +1633,16 @@ enum LXMoonPalette {
         return order[(i + 1) % order.count]
     }
     static let chat: [String: [String: Any]] = [
-        "day": ["bg": "#f6fbff", "me": "#c8d8e8", "meFg": "#2a3a4d", "aiFg": "#2a3a4d", "faint": "#92a6b8", "fn": "#92a6b8", "fnStar": "#b6d6e8", "think": "#93b2d2", "accent": "#618fbd", "thinkBody": "#769ec6", "accentFg": "#2a3a4d", "hairline": "#7a8c9e", "hairlineA": 0.22, "cardBg": "#fbfdff", "segTrack": "#eff3f6", "menuBg": "#f4f8fb", "fg": "#2a3a4d", "textSoft": "#64798d", "sliderThumb": "#618fbd", "sendBg": "#d7eaf8", "rowPress": "#ecf3f8", "sidePad": 16, "hdrBtnBg": "#fafcfe", "hdrBtnFg": "#2a3a4d", "hdrRing": "#ffffff", "hdrRingA": 0.95, "pillBg": "#fafcfe", "pillFg": "#93b2d2", "statusFs": 12],   // 0926 她:Home 小输入框的发送键跟月夜同一支 #D7EAF8
+        // 0926 她:Home 小输入框的发送键跟月夜同一支 #D7EAF8。
+        // 0926 她:白天所有蓝按深浅换成星芒色 #B6D6E8 / 亮蓝 #D7EAF8,正文用黑 #1D1D1F;蓝色的字换灰 #8E8E93(星芒色当字看不清),
+        // 灰蓝小字换纯灰(#6E6E73 / #9A9AA0),很淡的蓝底色不动
+        "day": ["bg": "#f6fbff", "me": "#b6d6e8", "meFg": "#1d1d1f", "aiFg": "#1d1d1f", "faint": "#9a9aa0", "fn": "#9a9aa0", "fnStar": "#b6d6e8", "think": "#b6d6e8", "thinkText": "#8e8e93", "accent": "#b6d6e8", "accentText": "#8e8e93", "thinkBody": "#8e8e93", "accentFg": "#1d1d1f", "hairline": "#7a8c9e", "hairlineA": 0.22, "cardBg": "#fbfdff", "segTrack": "#eff3f6", "menuBg": "#f4f8fb", "fg": "#1d1d1f", "textSoft": "#6e6e73", "sliderThumb": "#b6d6e8", "sendBg": "#d7eaf8", "rowPress": "#ecf3f8", "sidePad": 16, "hdrBtnBg": "#fafcfe", "hdrBtnFg": "#1d1d1f", "hdrRing": "#ffffff", "hdrRingA": 0.95, "pillBg": "#fafcfe", "pillFg": "#8e8e93", "statusFs": 12],
         "half": ["bg": "#191917", "me": "#111110", "meFg": "#e9e5dc", "aiFg": "#e9e5dc", "faint": "#6e6b64", "fn": "#a5a198", "fnStar": "#d97757", "think": "#a5a198", "accent": "#da7a55", "thinkBody": "#8b8880", "accentFg": "#191917", "hairline": "#ffffff", "hairlineA": 0.08, "cardBg": "#21211f", "segTrack": "#373735", "menuBg": "#202020", "fg": "#e9e5dc", "textSoft": "#a5a198", "sliderThumb": "#da7a55", "sendBg": "#e9e5dc", "rowPress": "#232525", "sidePad": 16, "hdrBtnBg": "#242422", "hdrBtnFg": "#e9e5dc", "hdrRing": "#e9e5dc", "hdrRingA": 0.18, "pillBg": "#242422", "pillFg": "#a5a198", "statusFs": 12],
         "moon": ["bg": "#000000", "me": "#26252a", "meFg": "#ffffff", "aiFg": "#f5f5f5", "faint": "#717e97", "fn": "#d7eaf8", "fnStar": "#b6d6e8", "think": "#d7eaf8", "accent": "#a9d9ee", "thinkBody": "#b0b0b0", "accentFg": "#05070b", "hairline": "#dfe3ee", "hairlineA": 0.1, "cardBg": "#26252a", "segTrack": "#39383e", "menuBg": "#000000", "fg": "#f5f5f5", "textSoft": "#a5b0c6", "sliderThumb": "#b6d6e8", "sendBg": "#d7eaf8", "rowPress": "#0d0e10", "sidePad": 16, "hdrBtnBg": "#121212", "hdrBtnFg": "#d7eaf8", "hdrRing": "#d6dbea", "hdrRingA": 0.18, "pillBg": "#121212", "pillFg": "#d7eaf8", "statusFs": 12],   // 0926 她:只有星芒图案用星芒色,发送键 #D7EAF8
     ]
     static let card: [String: [String: Any]] = [
-        "day": ["bg": "#fafcfe", "bgAlpha": 0.86, "border": "#ffffff", "borderAlpha": 0.95, "sendBg": "#D7EAF8", "sendFg": "#05070B", "color": "#2A3A4D", "kbDark": false, "phColor": "#92a6b8", "modelFg": "#2a3a4d", "effortFg": "#64798d", "accent": "#618FBD", "quoteBg": "#fafcfe", "quoteBgA": 0.92, "quoteLine": "#9eafbc", "quoteLineA": 0.16, "textSoft": "#64798D", "textFaint": "#92A6B8"],   // 0926 她:白天发送键跟月夜一模一样
+        // 0926 她:白天发送键跟月夜一模一样;白天的字黑、蓝换星芒色、引用名字换灰(同上面聊天那套)
+        "day": ["bg": "#fafcfe", "bgAlpha": 0.86, "border": "#ffffff", "borderAlpha": 0.95, "sendBg": "#D7EAF8", "sendFg": "#05070B", "color": "#1D1D1F", "kbDark": false, "phColor": "#9a9aa0", "modelFg": "#1d1d1f", "effortFg": "#6e6e73", "accent": "#B6D6E8", "accentText": "#8E8E93", "quoteBg": "#fafcfe", "quoteBgA": 0.92, "quoteLine": "#9eafbc", "quoteLineA": 0.16, "textSoft": "#6E6E73", "textFaint": "#9A9AA0"],
         "half": ["bg": "#242422", "bgAlpha": 0.55, "border": "#ffffff", "borderAlpha": 0.1, "sendBg": "#E9E5DC", "sendFg": "#191917", "color": "#E9E5DC", "kbDark": true, "phColor": "#6e6b64", "modelFg": "#e9e5dc", "effortFg": "#a5a198", "accent": "#DA7A55", "quoteBg": "#222220", "quoteBgA": 0.94, "quoteLine": "#ffffff", "quoteLineA": 0.08, "textSoft": "#A5A198", "textFaint": "#6E6B64"],
         "moon": ["bg": "#121212", "bgAlpha": 0.55, "border": "#ffffff", "borderAlpha": 0.1, "sendBg": "#D7EAF8", "sendFg": "#05070B", "color": "#E3E2E7", "kbDark": true, "phColor": "#78859b", "modelFg": "#ffffff", "effortFg": "#78859b", "accent": "#A9D9EE", "quoteBg": "#121212", "quoteBgA": 1, "quoteLine": "#dfe3ee", "quoteLineA": 0.1, "textSoft": "#A5B0C6", "textFaint": "#717E97"],
     ]
@@ -1993,42 +2005,59 @@ enum LXVoiceCache {
     }
 }
 
-final class LXTopVeil: UIView {
-    private let blur = UIVisualEffectView(effect: nil)
-    private let maskV = LXScrimView()
-    private let dim = LXScrimView()
-    private let bottom: Bool
-    init(theme: LXChatTheme, bottom: Bool = false) {
-        self.bottom = bottom
+/// 0926 她:上下两头那层主题色的渐隐遮罩太明显,Telegram 消息滑出去也是渐隐,但没有这层东西 → 去掉颜色,渐隐不变。
+/// 做法:在消息上面盖一份跟背后一模一样的背景(底色 / 白天默认底 / 自定义壁纸 + 压暗那层),只在两头露出来,
+/// 深浅照原来那两条渐隐:消息照样渐渐淡掉,露出来的是壁纸本身。
+/// 不给消息列表直接加遮罩:那样气泡里的糊底就取不到背后的壁纸了
+final class LXEdgeFade: UIView {
+    private let top: Bool
+    /// 渐隐那一截的高度(顶上 = 刘海 + 56,底下 96)
+    var zone: CGFloat { didSet { if zone != oldValue { setNeedsLayout() } } }
+    private let clip = UIView()
+    private let solid = UIView()
+    private let defWall = LXDefaultWall()
+    private let wall = UIImageView()
+    private let scrim = LXScrimView()
+    private let ramp = CAGradientLayer()
+    init(top: Bool, zone: CGFloat) {
+        self.top = top
+        self.zone = zone
         super.init(frame: .zero)
         translatesAutoresizingMaskIntoConstraints = false
         isUserInteractionEnabled = false
-        for v in [blur, dim] as [UIView] { v.translatesAutoresizingMaskIntoConstraints = false; addSubview(v) }
-        NSLayoutConstraint.activate([
-            blur.topAnchor.constraint(equalTo: topAnchor), blur.bottomAnchor.constraint(equalTo: bottomAnchor),
-            blur.leadingAnchor.constraint(equalTo: leadingAnchor), blur.trailingAnchor.constraint(equalTo: trailingAnchor),
-            dim.topAnchor.constraint(equalTo: topAnchor), dim.bottomAnchor.constraint(equalTo: bottomAnchor),
-            dim.leadingAnchor.constraint(equalTo: leadingAnchor), dim.trailingAnchor.constraint(equalTo: trailingAnchor),
-        ])
-        blur.mask = maskV
-        apply(theme)
+        clip.isUserInteractionEnabled = false
+        clip.clipsToBounds = true
+        addSubview(clip)
+        wall.contentMode = .scaleAspectFill
+        wall.clipsToBounds = true
+        for v in [solid, defWall, wall, scrim] as [UIView] { v.isUserInteractionEnabled = false; clip.addSubview(v) }
+        clip.layer.mask = ramp
     }
     required init?(coder: NSCoder) { fatalError() }
-    func apply(_ theme: LXChatTheme) {
-        var w: CGFloat = 0
-        theme.bg.getWhite(&w, alpha: nil)
-        _ = w
-        blur.effect = nil
-        blur.isHidden = true
-        if bottom {
-            dim.set(color: theme.bg, alphas: [0, 0.12, 0.38, 0.72, 1], locations: [0, 0.3, 0.58, 0.85, 1])
-        } else {
-            dim.set(color: theme.bg, alphas: [1, 0.72, 0.38, 0.12, 0], locations: [0, 0.15, 0.42, 0.7, 1])
-        }
+    /// 照抄背后那几层现在的样子;applyWall 每次都调
+    func mirror(bg: UIColor, image: UIImage?, showDefault: Bool, scrimColor: UIColor, scrimAlphas: [CGFloat]) {
+        solid.backgroundColor = bg
+        defWall.isHidden = !showDefault
+        wall.image = image
+        wall.isHidden = image == nil
+        scrim.isHidden = image == nil
+        scrim.set(color: scrimColor, alphas: scrimAlphas, locations: [0, 0.30, 0.68, 1])
     }
     override func layoutSubviews() {
         super.layoutSubviews()
-        maskV.frame = blur.bounds
+        CATransaction.begin(); CATransaction.setDisableActions(true)
+        let z = min(zone, bounds.height)
+        clip.frame = CGRect(x: 0, y: top ? 0 : bounds.height - z, width: bounds.width, height: z)
+        // 副本按整页大小摆,跟背后那几层对齐,只露出这一截
+        let full = CGRect(x: 0, y: -clip.frame.minY, width: bounds.width, height: bounds.height)
+        for v in [solid, defWall, wall, scrim] as [UIView] { v.frame = full }
+        ramp.frame = clip.bounds
+        let stops: [(CGFloat, CGFloat)] = top
+            ? [(0, 1), (0.15, 0.72), (0.42, 0.38), (0.7, 0.12), (1, 0)]
+            : [(0, 0), (0.3, 0.12), (0.58, 0.38), (0.85, 0.72), (1, 1)]
+        ramp.colors = stops.map { UIColor(white: 0, alpha: $0.1).cgColor }
+        ramp.locations = stops.map { NSNumber(value: Double($0.0)) }
+        CATransaction.commit()
     }
 }
 
@@ -2161,9 +2190,11 @@ final class LXBubbleCell: UITableViewCell {
     /// 0925 她给的参考图(同一台手机 3x 截图量的),她选 A:头像也放到 38,其余全照参考图 1:1——
     /// 贴屏边 12、头像到气泡 10、正文 14、单行气泡 31.75 在头像里上下居中、单行消息一行 55.2、换人说话不额外加空。
     /// 头像形状还是我们的方角;头像下的时间她定 9 号。
-    static let avaSize: CGFloat = 38
+    /// 0926 她:头像缩小一点点,字不变 → 34。离屏边 12、到气泡 10 照旧(气泡跟着往外 4);
+    /// 行高、气泡上下位置都不动,头像还是跟单行气泡上下居中(avaCenterOff)
+    static let avaSize: CGFloat = 34
     static let avaEdge: CGFloat = 12
-    static let avaInset: CGFloat = avaEdge + avaSize + 10      // 气泡离屏边 60
+    static let avaInset: CGFloat = avaEdge + avaSize + 10      // 气泡离屏边 56
     static let avaFontSize: CGFloat = 14
     static let avaLine: CGFloat = 19.9                          // 21.3 × 14/15:行高跟字号同比
     /// 她:气泡里字的上下留白要一样。截图量过(15 号和 11.8 号两种):字墨在行框里本来就居中,
@@ -2172,10 +2203,12 @@ final class LXBubbleCell: UITableViewCell {
     static let avaPadB: CGFloat = 5.925
     static let avaPadH: CGFloat = 12.75                        // 参考图气泡比字宽 27.5 = 2 × 12.75 + 2
     static let avaMaxRadius: CGFloat = 16.8                     // 18 × 14/15
-    /// 单行气泡 = 5.925 + 19.9 + 5.925 = 31.75(参考 31.7),在 38 的头像里居中 → 气泡顶比头像顶低 3.1(行顶就是头像顶)
+    /// 单行气泡 = 5.925 + 19.9 + 5.925 = 31.75(参考 31.7),在 38 的头像里居中 → 气泡顶比头像顶低 3.1(行顶就是头像顶)。
+    /// 0926 头像缩到 34 以后这个 3.1 照旧当"行顶到气泡顶"(行高不变),头像自己按 avaCenterOff 对单行气泡居中
     static let avaLift: CGFloat = 3.1
+    static let avaCenterOff: CGFloat = (avaSize - (avaPadT + avaLine + avaPadB)) / 2
     /// 头像模式里气泡与气泡之间固定的空(不随气泡高矮变):挂在每行气泡下面 20.35,加下一行的 3.1 = 23.45(参考 23.7)。
-    /// 单行一行 = 3.1 + 31.75 + 20.35 = 55.2(参考 55.2),装得下头像 38 + 3 + 时间 11 + 1 = 53,所以时间永远落在本行框里。
+    /// 单行一行 = 3.1 + 31.75 + 20.35 = 55.2(参考 55.2),装得下头像 + 3 + 时间 11 + 1(38 时 53,34 时 51),所以时间永远落在本行框里。
     static let avaRowGap: CGFloat = 20.35
     static func bubbleFont(_ av: Bool) -> UIFont { av ? bodyFont(size: avaFontSize) : bodyFont() }
     static func bubbleLine(_ av: Bool) -> CGFloat { av ? avaLine : 21.3 }
@@ -2307,7 +2340,7 @@ final class LXBubbleCell: UITableViewCell {
             timeBotC,
             botBubbleC,
             avaL, avaR, avaBottomC,
-            avatarV.topAnchor.constraint(equalTo: bubble.topAnchor, constant: -Self.avaLift),
+            avatarV.topAnchor.constraint(equalTo: bubble.topAnchor, constant: -Self.avaCenterOff),
             avatarV.widthAnchor.constraint(equalToConstant: Self.avaSize),
             avatarV.heightAnchor.constraint(equalToConstant: Self.avaSize),
         ])
@@ -2491,7 +2524,7 @@ final class LXBubbleCell: UITableViewCell {
             // 头像模式正文 14:引用条的字同比收(11.5/12.5 × 14/15),不然引用比正文还大
             qName.font = .systemFont(ofSize: av ? 10.7 : 11.5, weight: .semibold)
             qText.font = .systemFont(ofSize: av ? 11.7 : 12.5)
-            qName.textColor = theme.accent
+            qName.textColor = theme.accentText
             qText.textColor = theme.aiFg.withAlphaComponent(0.75)
             if mine {
                 qBlock.backgroundColor = UIColor(white: 1, alpha: 0.55)
@@ -2871,7 +2904,7 @@ final class LXThinkHeadCell: UITableViewCell {
     func configure(label: String, open: Bool, live: Bool, theme: LXChatTheme) {
         starLeadC.constant = theme.avatars ? LXBubbleCell.avaInset : 16
         lab.text = label
-        lab.textColor = theme.think
+        lab.textColor = theme.thinkText
         star.isHidden = live
         flower.isHidden = !live
         if live { flower.start(color: theme.accent) } else { flower.stop() }
@@ -3465,6 +3498,7 @@ final class LXHeaderBar: UIView {
 
     func setTyping(_ on: Bool, color: UIColor) {
         armForegroundRelight()
+        let color = inkOverride ?? color
         dotColor = color
         dotsV.isHidden = !on
         if on && dotLayers.isEmpty {
@@ -3577,6 +3611,7 @@ final class LXHeaderBar: UIView {
                 g.leadingAnchor.constraint(equalTo: v.leadingAnchor),
                 g.trailingAnchor.constraint(equalTo: v.trailingAnchor),
             ])
+            glassVs.append(g)
             return true
         }
         return false
@@ -3600,6 +3635,33 @@ final class LXHeaderBar: UIView {
         pill.layer.borderColor = t.hdrRing.cgColor
         statusL.textColor = t.pillFg
         statusL.font = LXThinkBodyCell.sysFont(t.statusFs)
+        syncGlass(t)
+    }
+
+    private var glassVs: [UIView] = []
+    private var inkOverride: UIColor?
+    /// 0926 她:顶上这三颗玻璃也跟输入栏一样按壁纸深浅走(浅壁纸 = 浅玻璃),没设自定义壁纸照主题。
+    /// 玻璃跟主题不同深浅时,图标、状态字、打字的点换成那块玻璃配的墨(浅玻璃用白天那套,深玻璃用月夜那套),免得看不见
+    func syncGlass(_ t: LXChatTheme) {
+        guard glassed else { return }
+        var w: CGFloat = 1
+        t.bg.getWhite(&w, alpha: nil)
+        let themeDark = w < 0.5
+        let dark = ChatListPlugin.wallLight.map { !$0 } ?? themeDark
+        for g in glassVs { g.overrideUserInterfaceStyle = dark ? .dark : .light }
+        guard dark != themeDark, let pal = LXMoonPalette.chat[dark ? "moon" : "day"] else {
+            inkOverride = nil
+            for b in [menuBtn, moreBtn] { b.tintColor = t.hdrBtnFg }
+            statusL.textColor = t.pillFg
+            for d in dotLayers { d.backgroundColor = t.pillFg.cgColor }
+            return
+        }
+        let fg = (pal["hdrBtnFg"] as? String).flatMap { NativeInputPlugin.color($0) } ?? t.hdrBtnFg
+        let sf = (pal["pillFg"] as? String).flatMap { NativeInputPlugin.color($0) } ?? t.pillFg
+        inkOverride = sf
+        for b in [menuBtn, moreBtn] { b.tintColor = fg }
+        statusL.textColor = sf
+        for d in dotLayers { d.backgroundColor = sf.cgColor }
     }
 }
 
@@ -4384,13 +4446,14 @@ final class LXTermPeek: UIView {
         body.isEditable = false
         body.backgroundColor = .clear
         body.font = UIFont.monospacedSystemFont(ofSize: 11, weight: .regular)
-        body.textColor = UIColor(red: 0x9F/255.0, green: 0xB0/255.0, blue: 0xBF/255.0, alpha: 1)
+        // 0926 她:白天终端预览的字太浅,要跟终端页一样黑;月夜/半月照旧
+        body.textColor = LXSheetInk.dark ? UIColor(red: 0x9F/255.0, green: 0xB0/255.0, blue: 0xBF/255.0, alpha: 1) : LXSheetInk.text
         body.textContainerInset = UIEdgeInsets(top: 10, left: 8, bottom: 10, right: 8)
         body.text = "连接中…"
         addSubview(body)
         status.translatesAutoresizingMaskIntoConstraints = false
         status.font = UIFont.systemFont(ofSize: 10)
-        status.textColor = UIColor(white: 1, alpha: 0.45)
+        status.textColor = LXSheetInk.dark ? UIColor(white: 1, alpha: 0.45) : LXSheetInk.faint
         status.isHidden = true
         addSubview(status)
         host.addSubview(self)
@@ -4942,24 +5005,18 @@ public class ChatListPlugin: CAPPlugin, CAPBridgedPlugin, UITableViewDataSource,
         }
         hdr.apply(theme)
         safeTopV = safeTop
-        let veil = LXTopVeil(theme: theme)
-        cont.addSubview(veil)
-        NSLayoutConstraint.activate([
-            veil.topAnchor.constraint(equalTo: cont.topAnchor),
-            veil.leadingAnchor.constraint(equalTo: cont.leadingAnchor),
-            veil.trailingAnchor.constraint(equalTo: cont.trailingAnchor),
-            veil.heightAnchor.constraint(equalToConstant: safeTop + 56),
-        ])
-        topVeil = veil
-        let bveil = LXTopVeil(theme: theme, bottom: true)
-        cont.addSubview(bveil)
-        NSLayoutConstraint.activate([
-            bveil.bottomAnchor.constraint(equalTo: cont.bottomAnchor),
-            bveil.leadingAnchor.constraint(equalTo: cont.leadingAnchor),
-            bveil.trailingAnchor.constraint(equalTo: cont.trailingAnchor),
-            bveil.heightAnchor.constraint(equalToConstant: 96),
-        ])
-        botVeil = bveil
+        let tfade = LXEdgeFade(top: true, zone: safeTop + 56)
+        let bfade = LXEdgeFade(top: false, zone: 96)
+        for f in [tfade, bfade] {
+            cont.addSubview(f)
+            NSLayoutConstraint.activate([
+                f.topAnchor.constraint(equalTo: cont.topAnchor), f.bottomAnchor.constraint(equalTo: cont.bottomAnchor),
+                f.leadingAnchor.constraint(equalTo: cont.leadingAnchor), f.trailingAnchor.constraint(equalTo: cont.trailingAnchor),
+            ])
+        }
+        topFade = tfade
+        botFade = bfade
+        mirrorEdgeFades()
         cont.addSubview(hdr)
         header = hdr
         NSLayoutConstraint.activate([
@@ -5318,8 +5375,8 @@ public class ChatListPlugin: CAPPlugin, CAPBridgedPlugin, UITableViewDataSource,
 
     var topFadeV: UIVisualEffectView?
     var botFadeV: UIVisualEffectView?
-    var topVeil: LXTopVeil?
-    var botVeil: LXTopVeil?
+    var topFade: LXEdgeFade?
+    var botFade: LXEdgeFade?
     var fadeWrap: UIView?
     var wrapBotC: NSLayoutConstraint?
     var wrapFrozenC: NSLayoutConstraint?
@@ -5349,7 +5406,7 @@ public class ChatListPlugin: CAPPlugin, CAPBridgedPlugin, UITableViewDataSource,
         if multiOn { exitMulti() }
         data.stop()
         container?.removeFromSuperview()
-        container = nil; table = nil; bottomC = nil; header = nil; topFadeV = nil; botFadeV = nil; fadeWrap = nil; topVeil = nil; botVeil = nil
+        container = nil; table = nil; bottomC = nil; header = nil; topFadeV = nil; botFadeV = nil; fadeWrap = nil; topFade = nil; botFade = nil
         wallV = nil; scrimV = nil; defWallV = nil
         NativeInputPlugin.live?.card?.transform = .identity
         LXVoiceDock.shared?.transform = .identity
@@ -5479,6 +5536,7 @@ public class ChatListPlugin: CAPPlugin, CAPBridgedPlugin, UITableViewDataSource,
         UserDefaults.standard.set(on, forKey: Self.avatarsKey)
         rpSetVal("chatAvatarsRow", on ? "On" : "Off")
         if on { LXAvatarStore.ensureDefaults() }
+        adaptTextToWall(LXWallStore.image, reload: false)
         UIView.performWithoutAnimation { reloadTable(table) }
     }
 
@@ -5499,8 +5557,6 @@ public class ChatListPlugin: CAPPlugin, CAPBridgedPlugin, UITableViewDataSource,
         container?.backgroundColor = theme.bg
         applyWall()
         header?.apply(theme)
-        topVeil?.apply(theme)
-        botVeil?.apply(theme)
         syncEdgeFades()
         UIView.performWithoutAnimation { reloadTable(table) }
     }
@@ -5516,8 +5572,6 @@ public class ChatListPlugin: CAPPlugin, CAPBridgedPlugin, UITableViewDataSource,
             self.container?.backgroundColor = self.theme.bg
             self.applyWall()
             self.header?.apply(self.theme)
-            self.topVeil?.apply(self.theme)
-            self.botVeil?.apply(self.theme)
             self.syncEdgeFades()
             self.reloadTable(self.table)
             call.resolve(["ok": true])
@@ -5535,6 +5589,7 @@ public class ChatListPlugin: CAPPlugin, CAPBridgedPlugin, UITableViewDataSource,
             }
             if self.theme.avatars != on {
                 self.theme.avatars = on
+                self.adaptTextToWall(LXWallStore.image, reload: false)
                 self.reloadTable(self.table)
             }
             self.probe("avatar-set", "on=\(on) imgs=\(LXAvatarStore.images.keys.sorted())")
@@ -5548,16 +5603,30 @@ public class ChatListPlugin: CAPPlugin, CAPBridgedPlugin, UITableViewDataSource,
         wallV?.isHidden = (img == nil)
         scrimV?.isHidden = (img == nil)
         defWallV?.isHidden = !(img == nil && RPSpec.moonState == "day")
-        let color: UIColor
-        let alphas: [CGFloat]
-        switch RPSpec.moonState {
-        case "half": color = UIColor(red: 25/255, green: 25/255, blue: 23/255, alpha: 1); alphas = [0.42, 0.12, 0.05, 0.26]
-        case "moon": color = .black; alphas = [0.50, 0.14, 0.05, 0.34]
-        default:     color = .white; alphas = [0.38, 0.12, 0.04, 0.22]
-        }
+        let (color, alphas) = Self.scrimSpec
         scrimV?.set(color: color, alphas: alphas, locations: [0, 0.30, 0.68, 1])
+        mirrorEdgeFades()
+        header?.syncGlass(theme)
         adaptTextToWall(img)
         NativeInputPlugin.live?.syncAvatarInk()
+    }
+
+    private static var scrimSpec: (UIColor, [CGFloat]) {
+        switch RPSpec.moonState {
+        case "half": return (UIColor(red: 25/255, green: 25/255, blue: 23/255, alpha: 1), [0.42, 0.12, 0.05, 0.26])
+        case "moon": return (.black, [0.50, 0.14, 0.05, 0.34])
+        default:     return (.white, [0.38, 0.12, 0.04, 0.22])
+        }
+    }
+
+    /// 上下渐隐盖的那份背景跟真背景对齐:底色、白天默认底、壁纸、压暗都照抄
+    private func mirrorEdgeFades() {
+        let img = LXWallStore.image
+        let (color, alphas) = Self.scrimSpec
+        for f in [topFade, botFade] {
+            f?.mirror(bg: theme.bg, image: img, showDefault: img == nil && RPSpec.moonState == "day",
+                      scrimColor: color, scrimAlphas: alphas)
+        }
     }
 
     private static var lumCache: (ObjectIdentifier, CGFloat)?
@@ -5581,17 +5650,19 @@ public class ChatListPlugin: CAPPlugin, CAPBridgedPlugin, UITableViewDataSource,
     /// 自定义壁纸是不是浅的:跟聊天字变深同一个判断(中间那块平均亮度 > 0.55);没设自定义壁纸 = nil
     static var wallLight: Bool? { LXWallStore.image.flatMap { luminance($0) }.map { $0 > 0.55 } }
 
-    func adaptTextToWall(_ img: UIImage?) {
+    /// 0926 她:"现在有气泡了,那个字体根据背景颜色变化的机制可以去掉了" → 头像样式(两边都有气泡)字一直照主题,
+    /// 不跟壁纸深浅变,气泡的玻璃也就跟着主题走;不开头像的样式他的字直接写在壁纸上,那边照旧
+    func adaptTextToWall(_ img: UIImage?, reload: Bool = true) {
         let pal = LXMoonPalette.chat[RPSpec.moonState] ?? [:]
         var me = (pal["meFg"] as? String).flatMap { NativeInputPlugin.color($0) } ?? theme.meFg
         var ai = (pal["aiFg"] as? String).flatMap { NativeInputPlugin.color($0) } ?? theme.aiFg
-        if let img = img, let l = Self.luminance(img) {
+        if !theme.avatars, let img = img, let l = Self.luminance(img) {
             let fg = l > 0.55 ? UIColor(red: 0x1D/255, green: 0x1D/255, blue: 0x1F/255, alpha: 1) : UIColor.white
             me = fg; ai = fg
         }
         guard !theme.meFg.isEqual(me) || !theme.aiFg.isEqual(ai) else { return }
         theme.meFg = me; theme.aiFg = ai
-        UIView.performWithoutAnimation { reloadTable(table) }
+        if reload { UIView.performWithoutAnimation { reloadTable(table) } }
     }
 
     @objc func callPill(_ call: CAPPluginCall) {
