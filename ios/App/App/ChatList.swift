@@ -215,6 +215,8 @@ final class LXChatData {
     var draft: String = ""
     var typingOn = false
     var onTyping: ((Bool) -> Void)?
+    /// 顶上胶囊此刻亮没亮(见 syncLive)
+    private(set) var liveShown = false
     var thinkDraft: String = ""
     var thinkStart: Date?
     var expandedThink = Set<Int64>()
@@ -431,6 +433,7 @@ final class LXChatData {
         clearDetached(restore: false)
         resetPlacement()
         rows = []; draft = ""; draftShown = 0; typingOn = false; lastId = 0; hasOlder = true
+        liveShown = false
         liveTurnWatermark = 0
         clearThink(); releaseHold(); expandedThink.removeAll()
         loadCacheAndShow()
@@ -468,6 +471,7 @@ final class LXChatData {
             loadCacheAndShow()
         }
         rows = []; draft = ""; draftShown = 0; typingOn = false
+        liveShown = false
         lastId = msgs.last?.id ?? 0
         hasOlder = true
         liveTurnWatermark = 0
@@ -734,7 +738,6 @@ final class LXChatData {
             liveInbox = []
             detached = true
         }
-        if typingOn { onTyping?(false) }
         draft = ""; draftShown = 0; typingOn = false; liveTurnWatermark = 0
         clearThink(); releaseHold()
         resetPlacement()
@@ -982,11 +985,30 @@ final class LXChatData {
         return t.isEmpty ? head : head + "：" + t
     }
 
+    /// 0926 她:他回完了顶上胶囊还一直跳。胶囊按他此刻在不在动来亮:在打字、在想、在写就亮,都停了就灭。
+    /// 以前只在收到"在打字"开关时才通知胶囊,别处把 typingOn 清零时胶囊不知道,之后的"停了"又被当成没变,就卡着亮
+    /// 兜底:4 分钟没收到他任何新动静(在打字/在想/在写)就当停了,胶囊不会永远亮着
+    func syncLive() {
+        let fresh = Date().timeIntervalSince(liveTouched) < 240
+        let now = fresh && (typingOn || thinkStart != nil || !thinkDraft.isEmpty || !draft.isEmpty)
+        guard now != liveShown else { return }
+        liveShown = now
+        onTyping?(now)
+    }
+    private var liveTouched = Date.distantPast
+    private var liveTimer: Timer?
+    private func touchLive() {
+        liveTouched = Date()
+        liveTimer?.invalidate()
+        liveTimer = Timer.scheduledTimer(withTimeInterval: 241, repeats: false) { [weak self] _ in self?.syncLive() }
+    }
+
     func rebuild(stick: Bool) {
         if let lts = liveThinkTs,
            msgs.contains(where: { inSession($0) && $0.kind == "thinking" && $0.ts >= lts }) {
             clearThink()
         }
+        syncLive()
         var out: [LXRow] = []
         let allVisible = mergeTurnThinking(order.compactMap { idx[$0] }.filter { inSession($0) && renderable($0) })
         lastVisible = allVisible
@@ -1147,6 +1169,7 @@ final class LXChatData {
                 return
             }
             if liveTurnWatermark == 0 { liveTurnWatermark = lastId }
+            touchLive()
             draft += (obj["text"] as? String) ?? ""
             ensurePacer()
         case "thinking_delta":
@@ -1169,16 +1192,19 @@ final class LXChatData {
             } else {
                 thinkDraft += (obj["text"] as? String) ?? ""
             }
+            touchLive()
             typingOn = false
             ensureThinkTimer()
             ensurePacer()
         case "typing":
+            // 0926 她:别的窗口在忙(她给另一条线发消息、那边在干活)这边的胶囊也亮 → 只认这个窗口自己的
+            guard eventInSession(obj) else { return }
             let on = (obj["active"] as? Bool) ?? false
             if typingOn != on && draft.isEmpty && thinkDraft.isEmpty {
                 typingOn = on
                 if on, liveTurnWatermark == 0 { liveTurnWatermark = lastId }
+                if on { touchLive() }
                 rebuild(stick: true)
-                onTyping?(on)
             }
         case "reaction":
             guard let idn = obj["id"] as? NSNumber else { return }
@@ -5076,7 +5102,7 @@ public class ChatListPlugin: CAPPlugin, CAPBridgedPlugin, UITableViewDataSource,
             }
         }
         data.start(session: sid)
-        paintStatus(typing: data.typingOn)
+        paintStatus(typing: data.liveShown)
         armPushIntake()
 
         if LustreConfig.isPreview && LustreConfig.previewFocus == "bubbles" { previewBubbleSampler() }
@@ -5467,7 +5493,7 @@ public class ChatListPlugin: CAPPlugin, CAPBridgedPlugin, UITableViewDataSource,
             NativeInputPlugin.live?.setCardHidden(false)
         }
         LXSessionsAPI.markActive(sid)
-        paintStatus(typing: data.typingOn)
+        paintStatus(typing: data.liveShown)
         guard sid != "__legacy__", !sid.isEmpty,
               let u = URL(string: LustreConfig.apiBase + "/app/sessions/"
                           + (sid.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? sid)) else { return }
@@ -6451,7 +6477,7 @@ public class ChatListPlugin: CAPPlugin, CAPBridgedPlugin, UITableViewDataSource,
 
     /// 0925:备注改了——重排一遍(拍一拍那行字会跟着换),可见的气泡原地重配(引用条名字),不整表重画
     func namesChanged() {
-        paintStatus(typing: data.typingOn)
+        paintStatus(typing: data.liveShown)
         guard let t = table else { return }
         data.rebuild(stick: false)
         UIView.performWithoutAnimation {
