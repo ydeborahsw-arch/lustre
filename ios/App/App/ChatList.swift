@@ -2424,9 +2424,9 @@ final class LXBubbleCell: UITableViewCell {
         setNeedsLayout()
     }
 
-    /// tg = 头像模式聊天字照 Telegram 排:不收字距、空行原样留(一个空行占一整行)、不加段距,首尾换行去掉
+    /// tg = 头像模式聊天字照 Telegram:不收字距(0927 她:段距还用原来的)
     static func styled(_ text: String, base: UIFont, color: UIColor, lineGap: CGFloat, tg: Bool = false) -> NSAttributedString {
-        let text = tg ? text.trimmingCharacters(in: .newlines) : text.replacingOccurrences(of: "\n{2,}", with: "\n", options: .regularExpression)
+        let text = text.replacingOccurrences(of: "\n{2,}", with: "\n", options: .regularExpression)
         var a: AttributedString
         do {
             a = try AttributedString(markdown: text,
@@ -2488,7 +2488,7 @@ final class LXBubbleCell: UITableViewCell {
         ps.minimumLineHeight = lineGap
         ps.maximumLineHeight = lineGap
         ps.lineSpacing = 0
-        ps.paragraphSpacing = tg ? 0 : 11 * base.pointSize / 15      // 15 号字段距 11;头像模式照 Telegram 不加段距
+        ps.paragraphSpacing = 11 * base.pointSize / 15      // 15 号字段距 11;头像模式字小了同比收
         ns.addAttribute(.paragraphStyle, value: ps, range: full)
         return ns
     }
