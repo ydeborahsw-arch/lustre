@@ -215,6 +215,15 @@ final class LXChatData {
     var draft: String = ""
     var typingOn = false
     var onTyping: ((Bool) -> Void)?
+    /// 0927 她:压缩时顶上胶囊显示进度(照网页:relay 每秒从终端抄百分比推过来)。relay 同一时间只盯一场压缩,
+    /// 这里也只存一份、记着是哪个窗口的,只在那个窗口显示;压完 done 停 4 秒再清
+    struct CompactState { var sid: String; var p: Int; var done: Bool; var start: Date }
+    private(set) var compact: CompactState?
+    var onCompact: (() -> Void)?
+    var compactShown: CompactState? {
+        guard let c = compact, eventInSession(["api_session": c.sid]) else { return nil }
+        return c
+    }
     /// 顶上胶囊此刻亮没亮(见 syncLive)
     private(set) var liveShown = false
     var thinkDraft: String = ""
@@ -1143,6 +1152,17 @@ final class LXChatData {
         return es == session
     }
 
+    private func beginCompact(_ sid: String) {
+        let st = Date()
+        compact = CompactState(sid: sid, p: 0, done: false, start: st)
+        // 压缩不可能超 15 分钟:done 丢了也别让胶囊一直挂着
+        DispatchQueue.main.asyncAfter(deadline: .now() + 15 * 60) { [weak self] in
+            guard let self, self.compact?.start == st, self.compact?.done == false else { return }
+            self.compact = nil
+            self.onCompact?()
+        }
+    }
+
     func handle(_ obj: [String: Any]) {
         if LXCallSession.shared.isActive { LXCallSession.shared.feed(obj) }
         if obj["type"] == nil, obj["id"] is NSNumber, obj["from"] is String {
@@ -1206,6 +1226,34 @@ final class LXChatData {
                 if on { touchLive() }
                 rebuild(stick: true)
             }
+        case "compact_state":
+            // 全收下按窗口入账(只认当前窗口的话,切走再切回来收不到自家的 done,进度卡住)
+            let es = (obj["api_session"] as? String) ?? ""
+            switch (obj["state"] as? String) ?? "" {
+            case "start":
+                beginCompact(es)
+            case "progress":
+                if compact?.sid != es { beginCompact(es) }        // 重连错过 start 也能接上
+                let p = min(100, (obj["p"] as? NSNumber)?.intValue ?? 0)
+                compact?.p = max(compact?.p ?? 0, p)              // 真进度只进不退
+            case "done":
+                guard compact?.sid == es, compact?.done == false else { return }
+                compact?.done = true
+                compact?.p = 100
+                let st = compact?.start
+                DispatchQueue.main.asyncAfter(deadline: .now() + 4) { [weak self] in
+                    guard let self, self.compact?.start == st else { return }
+                    self.compact = nil
+                    self.onCompact?()
+                }
+            case "idle":
+                // 重连对账:relay 说此刻没有压缩在跑,本地残留一律清
+                guard compact != nil else { return }
+                compact = nil
+            default:
+                return
+            }
+            onCompact?()
         case "reaction":
             guard let idn = obj["id"] as? NSNumber else { return }
             let rx = (obj["reactions"] as? [String: Any])?.compactMap { $0.value as? String }.filter { !$0.isEmpty } ?? []
@@ -3496,6 +3544,11 @@ final class LXHeaderBar: UIView {
     let statusL = UILabel()
     let pillGroup = UIStackView()
     let dotsV = UIView()
+    /// 0927 她:压缩时胶囊本身当进度条(照网页 --compact-p):左边一层填到百分比处,nil = 不在压缩
+    private let fillClip = UIView()
+    private let fillL = CALayer()
+    private var fillP: CGFloat?
+    private lazy var pillMinW = pill.widthAnchor.constraint(greaterThanOrEqualToConstant: 110)
     private var dotLayers: [CALayer] = []
     var onTap: ((String) -> Void)?
 
@@ -3552,6 +3605,42 @@ final class LXHeaderBar: UIView {
         for d in dotLayers { d.backgroundColor = color.cgColor }
     }
 
+    /// 压缩进度:p = 0...1 填到哪,nil = 收起。压缩期间胶囊宽度钉在最长那句的宽,百分比一格格变时胶囊边不跟着抖
+    func setCompactFill(_ p: CGFloat?) {
+        if p == nil && fillP == nil { return }
+        let was = fillP
+        fillP = p
+        if p != nil {
+            if was == nil {
+                CATransaction.begin(); CATransaction.setDisableActions(true)
+                fillL.frame = CGRect(x: 0, y: 0, width: 0, height: pill.bounds.height)
+                fillL.opacity = 1
+                CATransaction.commit()
+            }
+            let f: UIFont = statusL.font ?? .systemFont(ofSize: 13)
+            let w = ("packing memory 100%" as NSString).size(withAttributes: [.font: f]).width
+            var m = ceil(w) + 34
+            if bounds.width > 0 { m = min(m, bounds.width - 2 * (16 + menuBtn.bounds.width + 8)) }
+            pillMinW.constant = max(110, m)
+        } else {
+            fillL.opacity = 0
+            pillMinW.constant = 110
+        }
+        setNeedsLayout()
+    }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        guard let p = fillP else { return }
+        fillL.frame = CGRect(x: 0, y: 0, width: pill.bounds.width * min(max(p, 0), 1), height: pill.bounds.height)
+    }
+
+    private func paintFill(dark: Bool) {
+        // 照网页:浅胶囊填浅蓝 #E3EAF5;深胶囊(网页月夜/半月)是一道稍亮的底
+        fillL.backgroundColor = (dark ? UIColor.white.withAlphaComponent(0.1)
+            : UIColor(red: 0xE3/255, green: 0xEA/255, blue: 0xF5/255, alpha: 1)).cgColor
+    }
+
     static func hamburger() -> UIImage {
         let S: CGFloat = 18
         return UIGraphicsImageRenderer(size: CGSize(width: S, height: S)).image { ctx in
@@ -3603,6 +3692,13 @@ final class LXHeaderBar: UIView {
         pillGroup.addArrangedSubview(statusL)
         pillGroup.addArrangedSubview(dotsV)
         pill.addSubview(pillGroup)
+        fillClip.translatesAutoresizingMaskIntoConstraints = false
+        fillClip.isUserInteractionEnabled = false
+        fillClip.clipsToBounds = true
+        fillClip.layer.cornerRadius = ph / 2
+        fillL.opacity = 0
+        fillClip.layer.addSublayer(fillL)
+        pill.insertSubview(fillClip, at: 0)
         addSubview(menuBtn); addSubview(pill); addSubview(moreBtn)
         menuBtn.addAction(UIAction { [weak self] _ in self?.onTap?("menu") }, for: .touchUpInside)
         pill.addAction(UIAction { [weak self] _ in self?.onTap?("status") }, for: .touchUpInside)
@@ -3619,13 +3715,17 @@ final class LXHeaderBar: UIView {
             pill.centerXAnchor.constraint(equalTo: centerXAnchor),
             pill.centerYAnchor.constraint(equalTo: menuBtn.centerYAnchor),
             pill.heightAnchor.constraint(equalToConstant: ph),
-            pill.widthAnchor.constraint(greaterThanOrEqualToConstant: 110),
+            pillMinW,
             pill.leadingAnchor.constraint(greaterThanOrEqualTo: menuBtn.trailingAnchor, constant: 8),
             pill.trailingAnchor.constraint(lessThanOrEqualTo: moreBtn.leadingAnchor, constant: -8),
             pillGroup.centerXAnchor.constraint(equalTo: pill.centerXAnchor),
             pillGroup.centerYAnchor.constraint(equalTo: pill.centerYAnchor, constant: 0.2),
             dotsV.widthAnchor.constraint(equalToConstant: 18),
             dotsV.heightAnchor.constraint(equalToConstant: 14),
+            fillClip.topAnchor.constraint(equalTo: pill.topAnchor),
+            fillClip.bottomAnchor.constraint(equalTo: pill.bottomAnchor),
+            fillClip.leadingAnchor.constraint(equalTo: pill.leadingAnchor),
+            fillClip.trailingAnchor.constraint(equalTo: pill.trailingAnchor),
         ])
         let hug = pill.trailingAnchor.constraint(equalTo: pillGroup.trailingAnchor, constant: 16)
         hug.priority = UILayoutPriority(999)
@@ -3680,11 +3780,12 @@ final class LXHeaderBar: UIView {
     /// 0926 她:顶上这三颗玻璃也跟输入栏一样按壁纸深浅走(浅壁纸 = 浅玻璃),没设自定义壁纸照主题。
     /// 玻璃跟主题不同深浅时,图标、状态字、打字的点换成那块玻璃配的墨(浅玻璃用白天那套,深玻璃用月夜那套),免得看不见
     func syncGlass(_ t: LXChatTheme) {
-        guard glassed else { return }
         var w: CGFloat = 1
         t.bg.getWhite(&w, alpha: nil)
         let themeDark = w < 0.5
+        guard glassed else { paintFill(dark: themeDark); return }
         let dark = ChatListPlugin.wallLight.map { !$0 } ?? themeDark
+        paintFill(dark: dark)
         for g in glassVs { g.overrideUserInterfaceStyle = dark ? .dark : .light }
         guard dark != themeDark, let pal = LXMoonPalette.chat[dark ? "moon" : "day"] else {
             inkOverride = nil
@@ -4931,6 +5032,9 @@ public class ChatListPlugin: CAPPlugin, CAPBridgedPlugin, UITableViewDataSource,
         data.onTyping = { [weak self] on in
             DispatchQueue.main.async { self?.paintStatus(typing: on) }
         }
+        data.onCompact = { [weak self] in
+            DispatchQueue.main.async { guard let s = self else { return }; s.paintStatus(typing: s.data.liveShown) }
+        }
         theme.loadCached(RPSpec.moonState)
         if let call { theme.take(call) }
         if LustreConfig.webless {
@@ -5927,6 +6031,14 @@ public class ChatListPlugin: CAPPlugin, CAPBridgedPlugin, UITableViewDataSource,
     }
 
     func paintStatus(typing: Bool) {
+        // 0927 她:压缩时胶囊写进度、本身当进度条(照网页),压完 packed 100% 停 4 秒再回名字;压缩盖过打字
+        if let c = data.compactShown {
+            header?.statusL.text = (c.done ? "packed " : "packing memory ") + "\(c.p)%"
+            header?.setTyping(false, color: theme.pillFg)
+            header?.setCompactFill(CGFloat(c.p) / 100)
+            return
+        }
+        header?.setCompactFill(nil)
         // 0926 她的单:顶上这行平时显示的名字跟备注走(原来写死英文名)
         header?.statusL.text = typing ? "typing to you" : LXNick.of(session: data.session)
         header?.setTyping(typing, color: theme.pillFg)
