@@ -63,7 +63,7 @@ enum LXSheetInk {
     private static var m: String { RPSpec.moonState }
     static var dark: Bool { m != "day" }
     // 0926 她:白天正文黑,灰蓝小字换纯灰
-    static var text: UIColor { m == "day" ? hex(0x1D1D1F) : m == "half" ? hex(0xE9E5DC) : UIColor(white: 0.95, alpha: 1) }
+    static var text: UIColor { m == "day" ? hex(0x000000) : m == "half" ? hex(0xE9E5DC) : UIColor(white: 0.95, alpha: 1) }
     static var icon: UIColor { m == "day" ? hex(0x1D1D1F) : m == "half" ? hex(0xE9E5DC) : UIColor(white: 0.9, alpha: 1) }
     static var soft: UIColor { m == "day" ? hex(0x6E6E73) : m == "half" ? hex(0xA5A198) : UIColor(red: 0.55, green: 0.6, blue: 0.7, alpha: 1) }
     static var faint: UIColor { m == "day" ? hex(0x9A9AA0) : m == "half" ? hex(0x6E6B64) : UIColor(red: 0.47, green: 0.52, blue: 0.61, alpha: 1) }

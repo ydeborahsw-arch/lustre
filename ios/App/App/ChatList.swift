@@ -1666,13 +1666,14 @@ enum LXMoonPalette {
         // 0926 她:Home 小输入框的发送键跟月夜同一支 #D7EAF8。
         // 0926 她:白天所有蓝按深浅换成星芒色 #B6D6E8 / 亮蓝 #D7EAF8,正文用黑 #1D1D1F;蓝色的字换灰 #8E8E93(星芒色当字看不清),
         // 灰蓝小字换纯灰(#6E6E73 / #9A9AA0),很淡的蓝底色不动
-        "day": ["bg": "#f6fbff", "me": "#b6d6e8", "meFg": "#1d1d1f", "aiFg": "#1d1d1f", "faint": "#9a9aa0", "fn": "#9a9aa0", "fnStar": "#b6d6e8", "think": "#b6d6e8", "thinkText": "#8e8e93", "accent": "#b6d6e8", "accentText": "#8e8e93", "thinkBody": "#8e8e93", "accentFg": "#1d1d1f", "hairline": "#7a8c9e", "hairlineA": 0.22, "cardBg": "#fbfdff", "segTrack": "#eff3f6", "menuBg": "#f4f8fb", "fg": "#1d1d1f", "textSoft": "#6e6e73", "sliderThumb": "#b6d6e8", "sendBg": "#d7eaf8", "rowPress": "#ecf3f8", "sidePad": 16, "hdrBtnBg": "#fafcfe", "hdrBtnFg": "#1d1d1f", "hdrRing": "#ffffff", "hdrRingA": 0.95, "pillBg": "#fafcfe", "pillFg": "#8e8e93", "statusFs": 12],
+        // 0927 她:字要纯黑 #000000(#1D1D1F 跟 Telegram 并排看着发灰)
+        "day": ["bg": "#f6fbff", "me": "#b6d6e8", "meFg": "#000000", "aiFg": "#000000", "faint": "#9a9aa0", "fn": "#9a9aa0", "fnStar": "#b6d6e8", "think": "#b6d6e8", "thinkText": "#8e8e93", "accent": "#b6d6e8", "accentText": "#8e8e93", "thinkBody": "#8e8e93", "accentFg": "#1d1d1f", "hairline": "#7a8c9e", "hairlineA": 0.22, "cardBg": "#fbfdff", "segTrack": "#eff3f6", "menuBg": "#f4f8fb", "fg": "#1d1d1f", "textSoft": "#6e6e73", "sliderThumb": "#b6d6e8", "sendBg": "#d7eaf8", "rowPress": "#ecf3f8", "sidePad": 16, "hdrBtnBg": "#fafcfe", "hdrBtnFg": "#1d1d1f", "hdrRing": "#ffffff", "hdrRingA": 0.95, "pillBg": "#fafcfe", "pillFg": "#8e8e93", "statusFs": 12],
         "half": ["bg": "#191917", "me": "#111110", "meFg": "#e9e5dc", "aiFg": "#e9e5dc", "faint": "#6e6b64", "fn": "#a5a198", "fnStar": "#d97757", "think": "#a5a198", "accent": "#da7a55", "thinkBody": "#8b8880", "accentFg": "#191917", "hairline": "#ffffff", "hairlineA": 0.08, "cardBg": "#21211f", "segTrack": "#373735", "menuBg": "#202020", "fg": "#e9e5dc", "textSoft": "#a5a198", "sliderThumb": "#da7a55", "sendBg": "#e9e5dc", "rowPress": "#232525", "sidePad": 16, "hdrBtnBg": "#242422", "hdrBtnFg": "#e9e5dc", "hdrRing": "#e9e5dc", "hdrRingA": 0.18, "pillBg": "#242422", "pillFg": "#a5a198", "statusFs": 12],
         "moon": ["bg": "#000000", "me": "#26252a", "meFg": "#ffffff", "aiFg": "#f5f5f5", "faint": "#717e97", "fn": "#d7eaf8", "fnStar": "#b6d6e8", "think": "#d7eaf8", "accent": "#a9d9ee", "thinkBody": "#b0b0b0", "accentFg": "#05070b", "hairline": "#dfe3ee", "hairlineA": 0.1, "cardBg": "#26252a", "segTrack": "#39383e", "menuBg": "#000000", "fg": "#f5f5f5", "textSoft": "#a5b0c6", "sliderThumb": "#b6d6e8", "sendBg": "#d7eaf8", "rowPress": "#0d0e10", "sidePad": 16, "hdrBtnBg": "#121212", "hdrBtnFg": "#d7eaf8", "hdrRing": "#d6dbea", "hdrRingA": 0.18, "pillBg": "#121212", "pillFg": "#d7eaf8", "statusFs": 12],   // 0926 她:只有星芒图案用星芒色,发送键 #D7EAF8
     ]
     static let card: [String: [String: Any]] = [
         // 0926 她:白天发送键跟月夜一模一样;白天的字黑、蓝换星芒色、引用名字换灰(同上面聊天那套)
-        "day": ["bg": "#fafcfe", "bgAlpha": 0.86, "border": "#ffffff", "borderAlpha": 0.95, "sendBg": "#D7EAF8", "sendFg": "#05070B", "color": "#1D1D1F", "kbDark": false, "phColor": "#9a9aa0", "modelFg": "#1d1d1f", "effortFg": "#6e6e73", "accent": "#B6D6E8", "accentText": "#8E8E93", "quoteBg": "#fafcfe", "quoteBgA": 0.92, "quoteLine": "#9eafbc", "quoteLineA": 0.16, "textSoft": "#6E6E73", "textFaint": "#9A9AA0"],
+        "day": ["bg": "#fafcfe", "bgAlpha": 0.86, "border": "#ffffff", "borderAlpha": 0.95, "sendBg": "#D7EAF8", "sendFg": "#05070B", "color": "#000000", "kbDark": false, "phColor": "#9a9aa0", "modelFg": "#1d1d1f", "effortFg": "#6e6e73", "accent": "#B6D6E8", "accentText": "#8E8E93", "quoteBg": "#fafcfe", "quoteBgA": 0.92, "quoteLine": "#9eafbc", "quoteLineA": 0.16, "textSoft": "#6E6E73", "textFaint": "#9A9AA0"],
         "half": ["bg": "#242422", "bgAlpha": 0.55, "border": "#ffffff", "borderAlpha": 0.1, "sendBg": "#E9E5DC", "sendFg": "#191917", "color": "#E9E5DC", "kbDark": true, "phColor": "#6e6b64", "modelFg": "#e9e5dc", "effortFg": "#a5a198", "accent": "#DA7A55", "quoteBg": "#222220", "quoteBgA": 0.94, "quoteLine": "#ffffff", "quoteLineA": 0.08, "textSoft": "#A5A198", "textFaint": "#6E6B64"],
         "moon": ["bg": "#121212", "bgAlpha": 0.55, "border": "#ffffff", "borderAlpha": 0.1, "sendBg": "#D7EAF8", "sendFg": "#05070B", "color": "#E3E2E7", "kbDark": true, "phColor": "#78859b", "modelFg": "#ffffff", "effortFg": "#78859b", "accent": "#A9D9EE", "quoteBg": "#121212", "quoteBgA": 1, "quoteLine": "#dfe3ee", "quoteLineA": 0.1, "textSoft": "#A5B0C6", "textFaint": "#717E97"],
     ]
@@ -2230,7 +2231,7 @@ final class LXBubbleCell: UITableViewCell {
     static let avaEdge: CGFloat = 12
     static let avaInset: CGFloat = avaEdge + avaSize + 10      // 气泡离屏边 56
     static let avaFontSize: CGFloat = 14
-    static let avaLine: CGFloat = 19.9                          // 21.3 × 14/15:行高跟字号同比
+    static let avaLine: CGFloat = 19                            // 0927 她:头像模式聊天字完全照 Telegram 来,从她的并排截图量出行高 19(原 19.9)
     /// 她:气泡里字的上下留白要一样。截图量过(15 号和 11.8 号两种):字墨在行框里本来就居中,
     /// 以前上 4.75 下 6.75 反而把字顶高了约 1pt——所以上下内边距就该相等。
     static let avaPadT: CGFloat = 5.925
@@ -2423,8 +2424,9 @@ final class LXBubbleCell: UITableViewCell {
         setNeedsLayout()
     }
 
-    static func styled(_ text: String, base: UIFont, color: UIColor, lineGap: CGFloat) -> NSAttributedString {
-        let text = text.replacingOccurrences(of: "\n{2,}", with: "\n", options: .regularExpression)
+    /// tg = 头像模式聊天字照 Telegram 排:不收字距、空行原样留(一个空行占一整行)、不加段距,首尾换行去掉
+    static func styled(_ text: String, base: UIFont, color: UIColor, lineGap: CGFloat, tg: Bool = false) -> NSAttributedString {
+        let text = tg ? text.trimmingCharacters(in: .newlines) : text.replacingOccurrences(of: "\n{2,}", with: "\n", options: .regularExpression)
         var a: AttributedString
         do {
             a = try AttributedString(markdown: text,
@@ -2447,7 +2449,7 @@ final class LXBubbleCell: UITableViewCell {
             ns.addAttribute(.font, value: f, range: range)
         }
         ns.addAttribute(.foregroundColor, value: color, range: full)
-        ns.addAttribute(.kern, value: -0.12, range: full)
+        ns.addAttribute(.kern, value: tg ? 0 : -0.12, range: full)
         let nss = ns.string as NSString
         var i = 0
         while i < nss.length {
@@ -2486,7 +2488,7 @@ final class LXBubbleCell: UITableViewCell {
         ps.minimumLineHeight = lineGap
         ps.maximumLineHeight = lineGap
         ps.lineSpacing = 0
-        ps.paragraphSpacing = 11 * base.pointSize / 15      // 15 号字段距 11;头像模式字小了同比收
+        ps.paragraphSpacing = tg ? 0 : 11 * base.pointSize / 15      // 15 号字段距 11;头像模式照 Telegram 不加段距
         ns.addAttribute(.paragraphStyle, value: ps, range: full)
         return ns
     }
@@ -2617,7 +2619,7 @@ final class LXBubbleCell: UITableViewCell {
             bubble.setGlass(!attOnly, light: LXSoftGlassView.onLight(theme.meFg))
             bubble.tailLeft = false
             tailCorner = !av && tail && !attOnly && !m.atts.contains { $0.kind == "image" }
-            label.attributedText = Self.callIconed(Self.styled(m.text, base: Self.bubbleFont(av), color: theme.meFg, lineGap: Self.bubbleLine(av)), m, color: theme.meFg)
+            label.attributedText = Self.callIconed(Self.styled(m.text, base: Self.bubbleFont(av), color: theme.meFg, lineGap: Self.bubbleLine(av), tg: av), m, color: theme.meFg)
             let p: CGFloat = attOnly ? 0 : (av ? Self.avaPadH : 13)
             padT.constant = attOnly ? 0 : (av ? Self.avaPadT : 5.75); padB.constant = attOnly ? 0 : -(av ? Self.avaPadB : 5.75)
             padL.constant = p; padR.constant = -p
@@ -2642,7 +2644,7 @@ final class LXBubbleCell: UITableViewCell {
             bubble.layer.cornerRadius = 0
             bubble.tailLeft = true
             tailCorner = false
-            label.attributedText = Self.callIconed(Self.styled(m.text, base: Self.bubbleFont(boxed), color: theme.aiFg, lineGap: boxed ? Self.avaLine : 26.7), m, color: theme.aiFg)
+            label.attributedText = Self.callIconed(Self.styled(m.text, base: Self.bubbleFont(boxed), color: theme.aiFg, lineGap: boxed ? Self.avaLine : 26.7, tg: boxed), m, color: theme.aiFg)
             timeLeftC.priority = UILayoutPriority(999); timeRightC.priority = UILayoutPriority(1)
             timeL.textAlignment = .left
             reactL.textAlignment = .left
@@ -2716,7 +2718,7 @@ final class LXBubbleCell: UITableViewCell {
             if let hit = wCache[wk] {
                 w = max(w, hit)
             } else {
-                let att = styled(m.text, base: bubbleFont(av), color: .white, lineGap: bubbleLine(av))
+                let att = styled(m.text, base: bubbleFont(av), color: .white, lineGap: bubbleLine(av), tg: av)
                 let r = att.boundingRect(with: CGSize(width: innerMax, height: .greatestFiniteMagnitude),
                                          options: [.usesLineFragmentOrigin, .usesFontLeading], context: nil)
                 let tw = ceil(r.width) + 2
