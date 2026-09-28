@@ -4333,7 +4333,8 @@ final class LXMsgMenu: UIView {
         }.withRenderingMode(.alwaysOriginal)
     }
 
-    init(msg: LXMsg, bubble: UIView, host: UIView, theme: LXChatTheme) {
+    init(msg: LXMsg, bubble: UIView, host: UIView, theme: LXChatTheme,
+         topLimit: CGFloat = 12, bottomLimit: CGFloat? = nil) {
         super.init(frame: host.bounds)
         autoresizingMask = [.flexibleWidth, .flexibleHeight]
         let mine = msg.from == "human"
@@ -4460,17 +4461,21 @@ final class LXMsgMenu: UIView {
         panel.layoutIfNeeded()
         let psz = panel.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize)
         let pw = max(150, psz.width), ph = psz.height
-        var top = r.maxY + 10
-        if top + ph + 12 > bounds.height { top = max(12, r.minY - 10 - ph) }
+        // 0928 她:键盘开着长按,菜单卡落在输入栏和键盘后面引用不了——只在顶栏和输入栏之间摆:
+        // 消息下面放得下放下面,不行放上面,都不行贴输入栏上沿;实在太高就保住最上面几项别钻进顶栏
+        let floorY = bottomLimit ?? (bounds.height - 12)
+        func place(_ h: CGFloat) -> CGFloat {
+            if r.maxY + 10 + h <= floorY { return r.maxY + 10 }
+            if r.minY - 10 - h >= topLimit { return r.minY - 10 - h }
+            return max(topLimit, floorY - h)
+        }
         var left = mine ? r.maxX - pw : r.minX
         left = max(10, min(left, bounds.width - pw - 10))
-        panel.frame = CGRect(x: left, y: top, width: pw, height: ph)
+        panel.frame = CGRect(x: left, y: place(ph), width: pw, height: ph)
         panel.layoutIfNeeded()
         let realH = ceil(col.frame.maxY + 5)
         if realH > ph + 0.5 {
-            var top2 = top
-            if top2 + realH + 12 > bounds.height { top2 = max(12, bounds.height - realH - 12) }
-            panel.frame = CGRect(x: left, y: top2, width: pw, height: realH)
+            panel.frame = CGRect(x: left, y: place(realH), width: pw, height: realH)
         }
         mat.frame = panel.bounds
         tint.frame = panel.bounds
@@ -5924,6 +5929,58 @@ public class ChatListPlugin: CAPPlugin, CAPBridgedPlugin, UITableViewDataSource,
         DispatchQueue.main.asyncAfter(deadline: .now() + 105) {
             NativeInputPlugin.live?.previewComposer(text: "Preview\nSecond line\nThird line")
         }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 118) { [weak self] in self?.previewMenuCheck() }
+    }
+
+    /// 预览专用(路线 composer,118 秒起)。0928 她:键盘开着长按,菜单卡落到输入栏和键盘后面引用不了。
+    /// 整页先盖一层纯色(聊天、顶栏、壁纸都压在底下),左上 (4,70) 放品红记号;一条假消息贴在输入栏上面,走真的长按菜单:
+    /// 120 秒 键盘开着+AI 那边(菜单高,该贴着输入栏上沿)、134 秒 键盘开着+她这边(该翻到消息上面)、
+    /// 148 秒 键盘收起+AI 那边(该翻到消息上面);三回菜单卡下沿都得在输入栏上沿之上。166 秒收掉
+    private func previewMenuCheck() {
+        guard LustreConfig.isPreview, let cont = container else { return }
+        NativeInputPlugin.live?.previewComposer(text: "")
+        NativeInputPlugin.live?.tv?.becomeFirstResponder()
+        let cover = UIView(frame: cont.bounds)
+        cover.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        cover.backgroundColor = UIColor(white: 0.16, alpha: 1)
+        let mark = UIView(frame: CGRect(x: 4, y: 70, width: 20, height: 20))
+        mark.backgroundColor = .magenta
+        cover.addSubview(mark)
+        cont.addSubview(cover)
+        func scene(_ at: Double, from: String, keyboard: Bool) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + at) { [weak self] in
+                guard let s = self else { return }
+                s.closeMenu()
+                cover.subviews.filter { $0 !== mark }.forEach { $0.removeFromSuperview() }
+                if !keyboard { NativeInputPlugin.live?.tv?.resignFirstResponder() }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                    guard let cont = s.container, let c = NativeInputPlugin.live?.card else { return }
+                    let cardTop = c.convert(c.bounds, to: cont).minY
+                    let mine = from == "human"
+                    let w: CGFloat = 230, h: CGFloat = 60
+                    let b = UIView(frame: CGRect(x: mine ? cont.bounds.width - 16 - w : 16, y: cardTop - 16 - h, width: w, height: h))
+                    b.backgroundColor = mine ? UIColor(red: 0.30, green: 0.45, blue: 0.62, alpha: 1) : UIColor(white: 0.30, alpha: 1)
+                    b.layer.cornerRadius = 18
+                    let l = UILabel(frame: b.bounds.insetBy(dx: 14, dy: 8))
+                    l.text = "样板:贴着输入栏的一条"
+                    l.textColor = .white
+                    l.font = LXBubbleCell.bodyFont()
+                    b.addSubview(l)
+                    cover.addSubview(b)
+                    let m = LXMsg(id: 900_000_001, from: from, kind: mine ? "user" : "reply",
+                                  text: "样板:贴着输入栏的一条", ts: Date(), session: "", attCount: 0)
+                    // 等假消息先画出来,长按抬起的那张快照才不是空的
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { s.showMenu(m, bubble: b) }
+                }
+            }
+        }
+        scene(2, from: "ai", keyboard: true)
+        scene(16, from: "human", keyboard: true)
+        scene(30, from: "ai", keyboard: false)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 48) { [weak self] in
+            self?.closeMenu()
+            cover.removeFromSuperview()
+        }
     }
 
     private static func previewLightWall(_ size: CGSize) -> UIImage {
@@ -7108,7 +7165,13 @@ public class ChatListPlugin: CAPPlugin, CAPBridgedPlugin, UITableViewDataSource,
         guard !multiOn, menu == nil, let cont = container else { return }
         guard m.id < Int64.max - 8 else { return }
         UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-        let mn = LXMsgMenu(msg: m, bubble: bubble, host: cont, theme: theme)
+        // 菜单卡的活动范围:顶栏下沿到输入栏上沿(输入栏跟着键盘走,键盘开着就是键盘上面那截)
+        let topLim = (header?.frame.maxY ?? (safeTopV + 58)) + 6
+        var botLim: CGFloat? = nil
+        if let c = NativeInputPlugin.live?.card, !c.isHidden, c.superview != nil {
+            botLim = c.convert(c.bounds, to: cont).minY - 10
+        }
+        let mn = LXMsgMenu(msg: m, bubble: bubble, host: cont, theme: theme, topLimit: topLim, bottomLimit: botLim)
         mn.onAct = { [weak self] act in self?.menuAct(act, m) }
         cont.addSubview(mn)
         menu = mn

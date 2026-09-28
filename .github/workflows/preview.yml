@@ -75,8 +75,10 @@ jobs:
           if [ "$LX_PREVIEW_FOCUS" = "composer" ]; then
             # Input bar only: the app parks it empty / with text / recording for about 20 s each; a shot every 5 s covers all three.
             # The app hides the chat list in this route, so these shots hold nothing but the bar.
+            # From about 120 s the app covers the page with a solid colour and a magenta square and long-presses
+            # a fake message (keyboard up, then down) to show where the message menu lands.
             sleep 5
-            for t in $(seq 10 5 115); do sleep 5; shot c$t; done
+            for t in $(seq 10 5 170); do sleep 5; shot c$t; done
           elif [ "$LX_PREVIEW_FOCUS" = "bubbles" ]; then
             # A full-screen page of sample bubbles covers everything; the chat list is hidden underneath.
             sleep 5
