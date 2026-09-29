@@ -5343,19 +5343,23 @@ public class ChatListPlugin: CAPPlugin, CAPBridgedPlugin, UITableViewDataSource,
         guard let cont = container else { return }
         switch g.state {
         case .began:
+            // 0929 她:划开抽屉有时左边一片黑。是上一次收抽屉的动画还没走完,它的收尾把抽屉藏了;
+            // 新的一划先把那段动画掐掉(掐掉的不跑收尾),再从页面眼下的位置接着拖
+            stopDrawerAnim()
+            drawerBaseTx = cont.transform.tx
             drawerBusy = true
             LXDrawer.show(host: bridge?.viewController?.view)
             LXDrawer.place(below: container)
             notifyListeners("chatEdge", data: ["phase": "begin"])
         case .changed:
-            let x = min(max(0, g.translation(in: cont).x), drawerW)
+            let x = min(max(0, drawerBaseTx + g.translation(in: cont).x), drawerW)
             let tf = CGAffineTransform(translationX: x, y: 0)
             cont.transform = tf
             NativeInputPlugin.live?.card?.transform = tf
             LXVoiceDock.shared?.transform = tf
             LXCallPill.shared?.transform = tf
         case .ended, .cancelled, .failed:
-            let x = min(max(0, g.translation(in: cont).x), drawerW)
+            let x = min(max(0, drawerBaseTx + g.translation(in: cont).x), drawerW)
             let vx = g.velocity(in: cont).x
             let shouldOpen = vx > 350 ? true : (vx < -350 ? false : x > drawerW / 2)
             settleDrawer(open: shouldOpen)
@@ -5369,6 +5373,7 @@ public class ChatListPlugin: CAPPlugin, CAPBridgedPlugin, UITableViewDataSource,
         guard let cont = container else { return }
         switch g.state {
         case .began:
+            stopDrawerAnim()
             drawerBaseTx = cont.transform.tx
             drawerBusy = true
         case .changed:
@@ -5399,6 +5404,7 @@ public class ChatListPlugin: CAPPlugin, CAPBridgedPlugin, UITableViewDataSource,
 
     func nativeOpenDrawer() {
         guard container != nil else { return }
+        stopDrawerAnim()
         drawerBusy = true
         LXDrawer.show(host: bridge?.viewController?.view)
         LXDrawer.place(below: container)
@@ -5425,8 +5431,15 @@ public class ChatListPlugin: CAPPlugin, CAPBridgedPlugin, UITableViewDataSource,
         }
     }
 
+    /// 上一段开/收抽屉的动画还在走就掐掉:掐掉的动画不跑收尾,不会再回头把抽屉藏起来
+    private func stopDrawerAnim() {
+        if let a = offsetAnimator, a.state == .active { a.stopAnimation(true) }
+        offsetAnimator = nil
+    }
+
     func settleDrawer(open: Bool) {
         guard let cont = container else { return }
+        stopDrawerAnim()
         let tf = open ? CGAffineTransform(translationX: drawerW, y: 0) : .identity
         let a = UIViewPropertyAnimator(duration: 0.28,
             controlPoint1: CGPoint(x: 0.22, y: 1), controlPoint2: CGPoint(x: 0.36, y: 1)) {

@@ -2180,6 +2180,7 @@ public class HomePlugin: CAPPlugin, CAPBridgedPlugin, UIGestureRecognizerDelegat
         didSet { if webReady, pendingMenuOpen { pendingMenuOpen = false; openHomeDrawer() } }
     }
     func openHomeDrawer() {
+        stopHomeAnim()
         LXDrawer.show(host: bridge?.viewController?.view)
         LXDrawer.place(below: home)
         notifyListeners("homeAct", data: ["act": "edgeBegin"])
@@ -2332,20 +2333,23 @@ public class HomePlugin: CAPPlugin, CAPBridgedPlugin, UIGestureRecognizerDelegat
         guard webReady, let v = home else { return }
         switch g.state {
         case .began:
+            // 0929 同聊天页:上一次收抽屉的动画先掐掉,免得它收尾时把刚划开的抽屉藏了
+            stopHomeAnim()
+            homeBaseTx = v.transform.tx
             home?.endEditing(true)
             LXDrawer.show(host: bridge?.viewController?.view)
             LXDrawer.place(below: v)
             notifyListeners("homeAct", data: ["act": "edgeBegin"])
             edgeBeginResends = 0
         case .changed:
-            let x = min(max(0, g.translation(in: v).x), drawerW)
+            let x = min(max(0, homeBaseTx + g.translation(in: v).x), drawerW)
             v.transform = CGAffineTransform(translationX: x, y: 0)
             if x > 30, edgeBeginResends < 4 {
                 edgeBeginResends += 1
                 notifyListeners("homeAct", data: ["act": "edgeBegin"])
             }
         case .ended, .cancelled, .failed:
-            let x = min(max(0, g.translation(in: v).x), drawerW)
+            let x = min(max(0, homeBaseTx + g.translation(in: v).x), drawerW)
             let vx = g.velocity(in: v).x
             let open = vx > 350 ? true : (vx < -350 ? false : x > drawerW / 2)
             settleHome(open: open)
@@ -2354,10 +2358,16 @@ public class HomePlugin: CAPPlugin, CAPBridgedPlugin, UIGestureRecognizerDelegat
     }
 
     private var homeBaseTx: CGFloat = 0
+    private var homeAnim: UIViewPropertyAnimator?
+    private func stopHomeAnim() {
+        if let a = homeAnim, a.state == .active { a.stopAnimation(true) }
+        homeAnim = nil
+    }
     @objc func homeClosePan(_ g: UIPanGestureRecognizer) {
         guard let v = home else { return }
         switch g.state {
         case .began:
+            stopHomeAnim()
             homeBaseTx = v.transform.tx
         case .changed:
             let x = min(max(0, homeBaseTx + g.translation(in: v).x), drawerW)
@@ -2375,6 +2385,7 @@ public class HomePlugin: CAPPlugin, CAPBridgedPlugin, UIGestureRecognizerDelegat
 
     func settleHome(open: Bool, notify: Bool = true) {
         guard let v = home else { return }
+        stopHomeAnim()
         let tf = open ? CGAffineTransform(translationX: drawerW, y: 0) : .identity
         let a = UIViewPropertyAnimator(duration: 0.28,
             controlPoint1: CGPoint(x: 0.22, y: 1), controlPoint2: CGPoint(x: 0.36, y: 1)) {
@@ -2384,6 +2395,7 @@ public class HomePlugin: CAPPlugin, CAPBridgedPlugin, UIGestureRecognizerDelegat
         }
         if !open { a.addCompletion { _ in LXDrawer.hide() } }
         a.startAnimation()
+        homeAnim = a
         if notify { notifyListeners("homeAct", data: ["act": "edgeSettled", "open": open]) }
     }
 
