@@ -1235,7 +1235,8 @@ final class LXChatData {
             case "progress":
                 if compact?.sid != es { beginCompact(es) }        // 重连错过 start 也能接上
                 let p = min(100, (obj["p"] as? NSNumber)?.intValue ?? 0)
-                compact?.p = max(compact?.p ?? 0, p)              // 真进度只进不退
+                let was = compact?.p ?? 0                          // 先取出来再写,同一句里又读又写 compact 编译不过
+                compact?.p = max(was, p)                           // 真进度只进不退
             case "done":
                 guard compact?.sid == es, compact?.done == false else { return }
                 compact?.done = true
