@@ -2435,7 +2435,13 @@ public class HomePlugin: CAPPlugin, CAPBridgedPlugin, UIGestureRecognizerDelegat
             }
             self.home?.removeFromSuperview()
             self.home = nil
-            LXDrawer.hide()
+            // 0929:聊天页正把抽屉收回去时抽屉归它:只把抽屉挪回聊天页底下,收完它自己会藏;
+            // 在这儿先藏,收回那 0.28 秒左边就是一片黑
+            if ChatListPlugin.live?.drawerInUse ?? false {
+                LXStage.settle(self.bridge?.viewController?.view)
+            } else {
+                LXDrawer.hide()
+            }
         }
     }
 

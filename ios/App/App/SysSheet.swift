@@ -595,8 +595,9 @@ public class SysPlugin: CAPPlugin, CAPBridgedPlugin {
             closePage()
             if LustreConfig.webless {
                 if let chat = ChatListPlugin.live {
-                    if !sid.isEmpty, sid != chat.data.session { chat.switchTo(sid) }
-                    LXDrawer.hide()
+                    // 0929 她:跳回眼下这个对话时,以前只把抽屉藏了、页面还推在右边=左边一片黑;
+                    // 现在跟在抽屉里点对话一样收回去(换别的对话 switchTo 本来就会收)
+                    if !sid.isEmpty, sid != chat.data.session { chat.switchTo(sid) } else { chat.backToChat() }
                     if id > 0 {
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { chat.jumpToMessage(id) }
                     }

@@ -4981,6 +4981,8 @@ public class ChatListPlugin: CAPPlugin, CAPBridgedPlugin, UITableViewDataSource,
     private var drawerBusy = false {
         didSet { if drawerBusy != oldValue { freezeWrapHeight(drawerBusy) } }
     }
+    /// 聊天页的抽屉开着,或正在开/收(收完它自己会藏抽屉)
+    var drawerInUse: Bool { drawerBusy }
     private var pendingPaint = false
     private var forceStick = false
     var pinUntil = Date.distantPast
@@ -5412,6 +5414,18 @@ public class ChatListPlugin: CAPPlugin, CAPBridgedPlugin, UITableViewDataSource,
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
             self.settleDrawer(open: true)
             self.notifyListeners("chatEdge", data: ["phase": "settled", "open": true])
+        }
+    }
+
+    /// 0929:从抽屉里打开的页面跳回眼下这个对话——跟在抽屉里点对话同一个动作(收抽屉、离开首页),只是不换窗
+    func backToChat() {
+        if let c = container, c.transform.tx > 0 {
+            settleDrawer(open: false)
+            notifyListeners("chatEdge", data: ["phase": "settled", "open": false])
+        }
+        if LustreConfig.webless {
+            HomePlugin.live?.leaveHome()
+            NativeInputPlugin.live?.setCardHidden(false)
         }
     }
 
