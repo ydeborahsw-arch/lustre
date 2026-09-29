@@ -2276,15 +2276,16 @@ public class NativeInputPlugin: CAPPlugin, CAPBridgedPlugin, UITextViewDelegate 
     static let modelSpecKey = "lx.model.spec"
     static let effortKey = "lx.effort"
 
+    // 0929 她:列表里的 4.6 早就说好是 1M 那版。少了 [1m] 就是 20 万的窗口,上下文超了一切过去就被强制压缩
     static let modelNames: [(val: String, name: String)] = [
         ("claude-fable-5-1", "Fable 5.1"), ("claude-opus-5-5", "Opus 5.5"),
-        ("claude-opus-5", "Opus 5"), ("claude-opus-4-6", "Opus 4.6"),
+        ("claude-opus-5", "Opus 5"), ("claude-opus-4-6[1m]", "Opus 4.6"),
         ("claude-opus-4-5", "Opus 4.5"), ("claude-sonnet-4-6", "Sonnet 4.6"),
     ]
 
     static func prettyModel(_ raw: String) -> String {
         let base = raw.replacingOccurrences(of: "[1m]", with: "")
-        if let n = modelNames.first(where: { $0.val == base })?.name { return n }
+        if let n = modelNames.first(where: { $0.val.replacingOccurrences(of: "[1m]", with: "") == base })?.name { return n }
         guard base.hasPrefix("claude-") else { return raw }
         var parts = base.dropFirst(7).split(separator: "-").map(String.init)
         if let last = parts.last, last.count == 8, Int(last) != nil { parts.removeLast() }
