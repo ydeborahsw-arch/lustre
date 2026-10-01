@@ -5,9 +5,9 @@ on:
   workflow_dispatch:
     inputs:
       focus:
-        description: "tour = the full walk-through; composer = only the avatar-mode input bar; bubbles = a page of sample bubbles"
+        description: "tour = the full walk-through; composer = only the avatar-mode input bar; bubbles = a page of sample bubbles; coread = the reading room with a sample book"
         type: choice
-        options: [tour, composer, bubbles]
+        options: [tour, composer, bubbles, coread]
         default: tour
 
 env:
@@ -79,6 +79,11 @@ jobs:
             # a fake message (keyboard up, then down) to show where the message menu lands.
             sleep 5
             for t in $(seq 10 5 170); do sleep 5; shot c$t; done
+          elif [ "$LX_PREVIEW_FOCUS" = "coread" ]; then
+            # The reading room opens full screen over everything with a sample book and sample notes only (no account data).
+            # It steps through 15 screens, 8 s each, starting about 1 s after the chat finishes loading; a shot every 4 s.
+            sleep 5
+            for t in $(seq 10 4 150); do sleep 4; shot r$t; done
           elif [ "$LX_PREVIEW_FOCUS" = "bubbles" ]; then
             # A full-screen page of sample bubbles covers everything; the chat list is hidden underneath.
             # The page changes about every 25 s (plain bubbles, avatar bubbles, then sidebar rows); from about 80 s the

@@ -280,7 +280,7 @@ struct LXDrawerSpec {
     var hasAva = false
     var sig = "default"
 
-    static let nativeMenus: Set<String> = ["calls", "artifacts", "terminal", "archive"]
+    static let nativeMenus: Set<String> = ["calls", "artifacts", "terminal", "archive", "library"]   // 1001 共读原生化后 Library 回到抽屉
 
     static let key = "lx.drawer.spec"
     static func from(_ d: [String: Any]) -> LXDrawerSpec {
@@ -1316,6 +1316,10 @@ public class DrawerPlugin: CAPPlugin, CAPBridgedPlugin {
                 let vc = LXArchiveVC()
                 vc.modalPresentationStyle = .fullScreen
                 DrawerPlugin.topVC()?.present(vc, animated: true)
+                return
+            }
+            if act == "menu", arg == "library", LustreConfig.webless {
+                LXCoReadVC.open()
                 return
             }
             if act == "menu", arg == "terminal", LustreConfig.webless {
