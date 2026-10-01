@@ -5948,10 +5948,51 @@ public class ChatListPlugin: CAPPlugin, CAPBridgedPlugin, UITableViewDataSource,
         let page = LXBubbleSampler(frame: win.bounds)
         page.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         win.addSubview(page)
+        // 1001:75 秒摘掉样板页,拍输入框里的引用条
+        DispatchQueue.main.asyncAfter(deadline: .now() + 75) { [weak self, weak page] in
+            page?.removeFromSuperview()
+            self?.previewQuoteComposer()
+        }
         Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self, weak page] tm in
             guard let s = self, let p = page else { tm.invalidate(); return }
             s.table?.isHidden = true
             p.superview?.bringSubviewToFront(p)
+        }
+    }
+
+    /// 预览 bubbles 路线 75 秒起(1001):输入框里的引用条,引用是样板字。聊天列表一直藏着,屏幕上只有顶栏、输入栏和底色;
+    /// 左上照旧一块品红记号,旁边小方块报第几步,每步 10 秒:黄=头像样式月夜空框、青=三行字、红=白天一行字、
+    /// 紫=不开头像(卡片样式)月夜一行字、白=卡片样式白天、灰=收掉引用(输入栏该缩回原来的高)
+    private func previewQuoteComposer() {
+        guard LustreConfig.isPreview, let t = table, let win = bridge?.viewController?.view.window else { return }
+        t.isHidden = true
+        Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] tm in
+            guard let s = self else { tm.invalidate(); return }
+            s.table?.isHidden = true
+        }
+        HomePlugin.live?.previewDismissEarly()
+        let mark = UIView(frame: LXBubbleSampler.beacon)
+        mark.backgroundColor = UIColor(red: 1, green: 0, blue: 1, alpha: 1)
+        let phase = UIView(frame: CGRect(x: 28, y: 70, width: 20, height: 20))
+        win.addSubview(mark); win.addSubview(phase)
+        theme.avatars = true
+        switchMoon("moon")
+        let ip = NativeInputPlugin.live
+        let steps: [(UIColor, () -> Void)] = [
+            (.yellow, { ip?.setQuote(on: true, name: "样板:名字", text: "样板:被引用的那句话,写得很长很长,看看到了右边是不是用省略号收尾")
+                        ip?.previewComposer(text: "") }),
+            (.cyan, { ip?.previewComposer(text: "Preview\nSecond line\nThird line") }),
+            (.red, { [weak self] in self?.switchMoon("day"); ip?.previewComposer(text: "Preview") }),
+            (UIColor(red: 0.5, green: 0, blue: 1, alpha: 1), { [weak self] in self?.theme.avatars = false; self?.switchMoon("moon") }),
+            (.white, { [weak self] in self?.switchMoon("day") }),
+            (.gray, { ip?.setQuote(on: false, name: "", text: "") }),
+        ]
+        for (i, st) in steps.enumerated() {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5 + Double(i) * 10) {
+                st.1()
+                phase.backgroundColor = st.0
+                win.bringSubviewToFront(mark); win.bringSubviewToFront(phase)
+            }
         }
     }
 

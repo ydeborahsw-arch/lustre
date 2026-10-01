@@ -1056,13 +1056,17 @@ public class NativeInputPlugin: CAPPlugin, CAPBridgedPlugin, UITextViewDelegate 
     var effortFgC = UIColor(red: 0.47, green: 0.52, blue: 0.61, alpha: 1)
     var accentC: UIColor?
     var quoteBar: UIView?
-    var quoteAccentV: UIView?
-    var quoteNameL: UILabel?
     var quoteTextL: UILabel?
     var quoteXBtn: UIButton?
     var quoteHC: NSLayoutConstraint?
     var quoteTopC: NSLayoutConstraint?
+    /// 头像样式:引用条底到药丸底(没引用时就是字底到药丸底,一行字在 40 里正中的那个留白)
+    var avQuoteBotC: NSLayoutConstraint?
     var quoteIsOn = false
+    /// 卡片样式的引用条字色/× 色(调色板 textSoft/textFaint);头像样式玻璃深浅跟主题不同时另配
+    var quoteSoftC: UIColor?
+    var quoteFaintC: UIColor?
+    static let quoteH: CGFloat = 30
     var recorder: AVAudioRecorder?
     var recTimer: Timer?
     var recT0: Date?
@@ -1086,7 +1090,6 @@ public class NativeInputPlugin: CAPPlugin, CAPBridgedPlugin, UITextViewDelegate 
     var avRecDot: UIView?
     var avRecL: UILabel?
     var avPillHC: NSLayoutConstraint?
-    var avTvBotC: NSLayoutConstraint?
     var cardLeadC: NSLayoutConstraint?
     var cardTrailC: NSLayoutConstraint?
     var cardMarginX: CGFloat = 10
@@ -1384,26 +1387,16 @@ public class NativeInputPlugin: CAPPlugin, CAPBridgedPlugin, UITextViewDelegate 
             cardV.addSubview(row)
             self.attsRow = row
             self.attsStack = stack
+            // 1001 她:引用照微信——挪到打字那行下面,一条窄条一行"名字:内容",右边一个 ×;颜色见 syncQuoteInk
             let qb = UIView()
             qb.translatesAutoresizingMaskIntoConstraints = false
-            qb.layer.cornerRadius = 12
+            qb.layer.cornerRadius = NativeInputPlugin.quoteH / 2
             qb.layer.cornerCurve = .continuous
-            qb.layer.borderWidth = 1
             qb.clipsToBounds = true
             qb.isHidden = true
-            qb.backgroundColor = UIColor(white: 0x12/255, alpha: 1)
-            qb.layer.borderColor = UIColor(red: 223/255, green: 227/255, blue: 238/255, alpha: 0.10).cgColor
-            let qa = UIView(); qa.translatesAutoresizingMaskIntoConstraints = false
-            qa.backgroundColor = UIColor(red: 0xA9/255, green: 0xD9/255, blue: 0xEE/255, alpha: 1)
-            qb.addSubview(qa)
-            let qn = UILabel()
-            qn.translatesAutoresizingMaskIntoConstraints = false
-            qn.textColor = UIColor(red: 0xA9/255, green: 0xD9/255, blue: 0xEE/255, alpha: 1)
-            qn.font = UIFont(name: "AnthropicSansWebVariable-TextRegular", size: 11) ?? UIFont.systemFont(ofSize: 11, weight: .semibold)
             let qt = UILabel()
             qt.translatesAutoresizingMaskIntoConstraints = false
             qt.font = UIFont(name: "AnthropicSansWebVariable-TextRegular", size: 12.5) ?? UIFont.systemFont(ofSize: 12.5)
-            qt.textColor = UIColor(red: 0xA5/255, green: 0xB0/255, blue: 0xC6/255, alpha: 1)
             qt.lineBreakMode = .byTruncatingTail
             let qx = UIButton(type: .system)
             qx.translatesAutoresizingMaskIntoConstraints = false
@@ -1412,10 +1405,10 @@ public class NativeInputPlugin: CAPPlugin, CAPBridgedPlugin, UITextViewDelegate 
             qx.addAction(UIAction { [weak self] _ in
                 LXOutbox.shared.clearQuote()
             }, for: .touchUpInside)
-            qb.addSubview(qn); qb.addSubview(qt); qb.addSubview(qx)
+            qb.addSubview(qt); qb.addSubview(qx)
             cardV.addSubview(qb)
-            self.quoteBar = qb; self.quoteAccentV = qa
-            self.quoteNameL = qn; self.quoteTextL = qt; self.quoteXBtn = qx
+            self.quoteBar = qb
+            self.quoteTextL = qt; self.quoteXBtn = qx
             cardV.addSubview(t)
             for b in [plus, model, mic, send, recX] { cardV.addSubview(b) }
             host.addSubview(cardV)
@@ -1429,7 +1422,8 @@ public class NativeInputPlugin: CAPPlugin, CAPBridgedPlugin, UITextViewDelegate 
             self.cardHeightC = hC
             let rowH = row.heightAnchor.constraint(equalToConstant: 0)
             self.attsHC = rowH
-            let qbTop = qb.topAnchor.constraint(equalTo: row.bottomAnchor, constant: 0)
+            // 引用条接在字下面(没引用时高 0、贴着字底,等于原来字直接接按钮/药丸底)
+            let qbTop = qb.topAnchor.constraint(equalTo: t.bottomAnchor, constant: 0)
             let qbH = qb.heightAnchor.constraint(equalToConstant: 0)
             self.quoteTopC = qbTop; self.quoteHC = qbH
             let micW = mic.widthAnchor.constraint(equalToConstant: 34)
@@ -1444,7 +1438,8 @@ public class NativeInputPlugin: CAPPlugin, CAPBridgedPlugin, UITextViewDelegate 
             let recXYN = recX.centerYAnchor.constraint(equalTo: plus.centerYAnchor)
             let qbLeadN = qb.leadingAnchor.constraint(equalTo: cardV.leadingAnchor, constant: 15)
             let qbTrailN = qb.trailingAnchor.constraint(equalTo: cardV.trailingAnchor, constant: -15)
-            self.normalCons = [rowTopN, rowLeadN, rowTrailN, sendTrailN, sendYN, recXTrailN, recXYN, qbLeadN, qbTrailN]
+            let qbBotN = qb.bottomAnchor.constraint(equalTo: plus.topAnchor, constant: -2)
+            self.normalCons = [rowTopN, rowLeadN, rowTrailN, sendTrailN, sendYN, recXTrailN, recXYN, qbLeadN, qbTrailN, qbBotN]
             let cardLead = cardV.leadingAnchor.constraint(equalTo: host.leadingAnchor, constant: marginX)
             let cardTrail = cardV.trailingAnchor.constraint(equalTo: host.trailingAnchor, constant: -marginX)
             self.cardLeadC = cardLead; self.cardTrailC = cardTrail
@@ -1489,17 +1484,11 @@ public class NativeInputPlugin: CAPPlugin, CAPBridgedPlugin, UITextViewDelegate 
                 qbH,
                 qbLeadN,
                 qbTrailN,
-                qa.leadingAnchor.constraint(equalTo: qb.leadingAnchor),
-                qa.topAnchor.constraint(equalTo: qb.topAnchor),
-                qa.bottomAnchor.constraint(equalTo: qb.bottomAnchor),
-                qa.widthAnchor.constraint(equalToConstant: 3),
-                qn.topAnchor.constraint(equalTo: qb.topAnchor, constant: 6),
-                qn.leadingAnchor.constraint(equalTo: qb.leadingAnchor, constant: 13),
-                qn.trailingAnchor.constraint(equalTo: qx.leadingAnchor, constant: -6),
-                qt.topAnchor.constraint(equalTo: qn.bottomAnchor, constant: 1),
-                qt.leadingAnchor.constraint(equalTo: qn.leadingAnchor),
-                qt.trailingAnchor.constraint(equalTo: qn.trailingAnchor),
-                qx.trailingAnchor.constraint(equalTo: qb.trailingAnchor, constant: -6),
+                qbBotN,
+                qt.leadingAnchor.constraint(equalTo: qb.leadingAnchor, constant: 12),
+                qt.trailingAnchor.constraint(equalTo: qx.leadingAnchor, constant: -2),
+                qt.centerYAnchor.constraint(equalTo: qb.centerYAnchor),
+                qx.trailingAnchor.constraint(equalTo: qb.trailingAnchor, constant: -3),
                 qx.centerYAnchor.constraint(equalTo: qb.centerYAnchor),
                 qx.widthAnchor.constraint(equalToConstant: 26),
                 qx.heightAnchor.constraint(equalToConstant: 26)
@@ -1589,6 +1578,8 @@ public class NativeInputPlugin: CAPPlugin, CAPBridgedPlugin, UITextViewDelegate 
         avRecDot = dot; avRecL = recL
         let pillH = pillG.heightAnchor.constraint(equalToConstant: 40)
         avPillHC = pillH
+        let qbBot = pillG.bottomAnchor.constraint(equalTo: qb.bottomAnchor, constant: 0)
+        avQuoteBotC = qbBot
         // 这些只管头像样式自己的东西,两种样式下都开着也不冲突
         NSLayoutConstraint.activate([
             voiceG.trailingAnchor.constraint(equalTo: cardV.trailingAnchor),
@@ -1631,8 +1622,10 @@ public class NativeInputPlugin: CAPPlugin, CAPBridgedPlugin, UITextViewDelegate 
             send.bottomAnchor.constraint(equalTo: pillG.bottomAnchor, constant: -3),
             recX.trailingAnchor.constraint(equalTo: pillG.trailingAnchor, constant: -3),
             recX.bottomAnchor.constraint(equalTo: pillG.bottomAnchor, constant: -3),
+            // 引用条在药丸里字的下面;右边跟字一样让出 43,发送键还在右下角,不压着条上的 ×
             qb.leadingAnchor.constraint(equalTo: pillG.leadingAnchor, constant: 15),
-            qb.trailingAnchor.constraint(equalTo: pillG.trailingAnchor, constant: -15),
+            qb.trailingAnchor.constraint(equalTo: pillG.trailingAnchor, constant: -43),
+            qbBot,
         ]
     }
 
@@ -1707,27 +1700,24 @@ public class NativeInputPlugin: CAPPlugin, CAPBridgedPlugin, UITextViewDelegate 
     func tvConstraintsInCard(_ t: UITextView, _ cardV: UIView) -> [NSLayoutConstraint] {
         if avatarOn, let pill = avPillG {
             // 头像样式:字在药丸里,字左边离药丸 15、右边整段留 43(3 + 发送键 34 + 6),发送键出没字不挪;
-            // 上接引用条、下贴药丸底,两头的常数由 updateCardHeight 算(一行时在 40 里正中)
+            // 上接附件条;下面接引用条,引用条再贴药丸底(没引用时它高 0)。两头的常数由 updateCardHeight 算(一行时在 40 里正中)
             let inset = t.textContainerInset
-            let top = t.topAnchor.constraint(equalTo: quoteBar?.bottomAnchor ?? pill.topAnchor, constant: 0)
-            let bot = t.bottomAnchor.constraint(equalTo: pill.bottomAnchor, constant: 0)
-            tvTopC = top; avTvBotC = bot
+            let top = t.topAnchor.constraint(equalTo: attsRow?.bottomAnchor ?? pill.topAnchor, constant: 0)
+            tvTopC = top
             return [
-                top, bot,
+                top,
                 t.leadingAnchor.constraint(equalTo: pill.leadingAnchor, constant: 15 - inset.left),
                 t.trailingAnchor.constraint(equalTo: pill.trailingAnchor, constant: -(43 - inset.right))
             ]
         }
-        guard let plus = plusBtn else { return [] }
-        let topRef = quoteBar?.bottomAnchor ?? attsRow?.bottomAnchor ?? cardV.topAnchor
-        let hasStuff = attsCount > 0 || quoteIsOn
-        let top = t.topAnchor.constraint(equalTo: topRef, constant: hasStuff ? 5 : (attsRow == nil ? 6 : 0))
+        // 卡片样式:附件条 → 字 → 引用条 → 按钮那一排;字底由引用条接着(见卡片里 qbTop / qbBotN)
+        let topRef = attsRow?.bottomAnchor ?? cardV.topAnchor
+        let top = t.topAnchor.constraint(equalTo: topRef, constant: attsCount > 0 ? 5 : (attsRow == nil ? 6 : 0))
         tvTopC = top
         return [
             top,
             t.leadingAnchor.constraint(equalTo: cardV.leadingAnchor, constant: 15),
             t.trailingAnchor.constraint(equalTo: cardV.trailingAnchor, constant: -15),
-            t.bottomAnchor.constraint(equalTo: plus.topAnchor, constant: -2)
         ]
     }
 
@@ -1755,9 +1745,9 @@ public class NativeInputPlugin: CAPPlugin, CAPBridgedPlugin, UITextViewDelegate 
         // 头像样式跟着卡片一起拆;录音中拆卡时字框被藏过,放回来
         if avatarOn { avatarOn = false; tv?.isHidden = false }
         avVoiceG = nil; avPillG = nil; avCapG = nil; avVoiceBtn = nil; avModelBtn = nil; avPlusBtn = nil
-        avRecDot = nil; avRecL = nil; avPillHC = nil; avTvBotC = nil; cardLeadC = nil; cardTrailC = nil
+        avRecDot = nil; avRecL = nil; avPillHC = nil; avQuoteBotC = nil; cardLeadC = nil; cardTrailC = nil
         normalCons = []; avatarCons = []
-        quoteBar = nil; quoteAccentV = nil; quoteNameL = nil; quoteTextL = nil; quoteXBtn = nil
+        quoteBar = nil; quoteTextL = nil; quoteXBtn = nil
         quoteHC = nil; quoteTopC = nil; quoteIsOn = false
         recCancelBtn = nil; micWC = nil
     }
@@ -1840,13 +1830,24 @@ public class NativeInputPlugin: CAPPlugin, CAPBridgedPlugin, UITextViewDelegate 
 
     func setQuote(on: Bool, name: String, text: String) {
         quoteIsOn = on
-        if on { quoteNameL?.text = name; quoteTextL?.text = text }
+        if on { quoteTextL?.text = name + "：" + text.replacingOccurrences(of: "\n", with: " ") }
         quoteBar?.isHidden = !on
-        quoteTopC?.constant = on ? 6 : 0
-        quoteHC?.constant = on ? 42 : 0
-        tvTopC?.constant = (attsCount > 0 || on) ? 5 : 0
+        quoteTopC?.constant = on ? 4 : 0
+        quoteHC?.constant = on ? Self.quoteH : 0
+        tvTopC?.constant = attsCount > 0 ? 5 : 0
         updateCardHeight()
         card?.superview?.layoutIfNeeded()
+    }
+
+    /// 1001 引用条的颜色:底是很薄的一层灰/白,跟它所在那块的深浅走(卡片样式看卡片;头像样式看药丸玻璃,浅壁纸上是浅玻璃)。
+    /// 深浅跟主题一致时字用调色板的淡字(白天灰、半月暖灰、月夜灰蓝),不一致时用那块玻璃配的墨
+    func syncQuoteInk() {
+        let dark = avatarOn ? avGlassDark : cardDark
+        quoteBar?.backgroundColor = dark ? UIColor(white: 1, alpha: 0.08) : UIColor(white: 0, alpha: 0.05)
+        let swap = dark != cardDark
+        let ink = dark ? UIColor.white : Self.lightGlassInk
+        quoteTextL?.textColor = (swap ? nil : quoteSoftC) ?? ink.withAlphaComponent(0.6)
+        quoteXBtn?.tintColor = (swap ? nil : quoteFaintC) ?? ink.withAlphaComponent(0.45)
     }
 
     func applyCardTheme(_ call: CAPPluginCall) {
@@ -1868,19 +1869,10 @@ public class NativeInputPlugin: CAPPlugin, CAPBridgedPlugin, UITextViewDelegate 
         if let phex = call.getString("phColor"), let pc = NativeInputPlugin.color(phex) { themePhC = pc; phLabel?.textColor = pc }
         if let mhex = call.getString("modelFg"), let mc = NativeInputPlugin.color(mhex) { modelFgC = mc }
         if let ehex = call.getString("effortFg"), let ec = NativeInputPlugin.color(ehex) { effortFgC = ec }
-        if let ahex = call.getString("accent"), let ac = NativeInputPlugin.color(ahex) {
-            quoteAccentV?.backgroundColor = ac
-            quoteNameL?.textColor = call.getString("accentText").flatMap { NativeInputPlugin.color($0) } ?? ac
-            accentC = ac
-        }
-        if let qhex = call.getString("quoteBg"), let qc = NativeInputPlugin.color(qhex) {
-            quoteBar?.backgroundColor = qc.withAlphaComponent(CGFloat(call.getFloat("quoteBgA") ?? 1))
-        }
-        if let lhex = call.getString("quoteLine"), let lc = NativeInputPlugin.color(lhex) {
-            quoteBar?.layer.borderColor = lc.withAlphaComponent(CGFloat(call.getFloat("quoteLineA") ?? 1)).cgColor
-        }
-        if let shex = call.getString("textSoft"), let sc = NativeInputPlugin.color(shex) { quoteTextL?.textColor = sc }
-        if let fhex = call.getString("textFaint"), let fc = NativeInputPlugin.color(fhex) { quoteXBtn?.tintColor = fc }
+        if let ahex = call.getString("accent"), let ac = NativeInputPlugin.color(ahex) { accentC = ac }
+        // 引用条的底和字在 syncQuoteInk 里定(函数末尾 syncAvatarInk 会走到),这里只记下调色板的淡字
+        if let shex = call.getString("textSoft"), let sc = NativeInputPlugin.color(shex) { quoteSoftC = sc }
+        if let fhex = call.getString("textFaint"), let fc = NativeInputPlugin.color(fhex) { quoteFaintC = fc }
         if let dark = call.getBool("kbDark") {
             if #available(iOS 26.0, *) {
                 cardBlur?.overrideUserInterfaceStyle = dark ? .dark : .light
@@ -1942,6 +1934,7 @@ public class NativeInputPlugin: CAPPlugin, CAPBridgedPlugin, UITextViewDelegate 
                                                    : UIColor(red: 0x9A/255, green: 0x9A/255, blue: 0xA0/255, alpha: 1)
         if let c = text { tv?.textColor = c }
         if let c = ph { phLabel?.textColor = c }
+        syncQuoteInk()
         LXVoiceDock.shared?.applyGlass()
     }
 
@@ -2159,7 +2152,7 @@ public class NativeInputPlugin: CAPPlugin, CAPBridgedPlugin, UITextViewDelegate 
         for (i, it) in items.enumerated() { stack.addArrangedSubview(makeAttChip(index: i, item: it)) }
         row.isHidden = items.isEmpty
         hC.constant = items.isEmpty ? 0 : 66
-        tvTopC?.constant = (items.count > 0 || quoteIsOn) ? 5 : 0
+        tvTopC?.constant = items.count > 0 ? 5 : 0
         syncSendIcon()
         updateCardHeight()
         card?.superview?.layoutIfNeeded()
@@ -2944,15 +2937,17 @@ public class NativeInputPlugin: CAPPlugin, CAPBridgedPlugin, UITextViewDelegate 
     func updateCardHeight() {
         guard let t = tv, let hC = cardHeightC else { return }
         if avatarOn, let pillHC = avPillHC {
-            // 头像样式:药丸 = 托盘(附件条/引用条)+ 字,一行时字在 40 里上下正中;
+            // 头像样式:药丸 = 上面的附件条 + 字 + 下面的引用条,一行字时字在 40 里上下正中(上下各留 pad);
+            // 有引用条时字底不再留 pad,改成 4 + 条高 + 6。
             // 卡片 = max(43, 药丸 + 3)(三样都 40 高、底抬 3,卡顶就是三样的顶),最高还是 cardMaxH,再多就在框里滚
-            let chain = 6 + (attsHC?.constant ?? 0) + (quoteTopC?.constant ?? 0) + (quoteHC?.constant ?? 0)
-            let tray: CGFloat = (attsCount > 0 || quoteIsOn) ? chain + 5 : 0
+            let chain = 6 + (attsHC?.constant ?? 0)
+            let tray: CGFloat = attsCount > 0 ? chain + 5 : 0
             let content = t.contentSize.height
             let pad = max(0, (40 - content) / 2)
-            let pill = min(cardMaxH - 3, max(40, tray + content + pad * 2))
+            let below = quoteIsOn ? (quoteTopC?.constant ?? 0) + (quoteHC?.constant ?? 0) + 6 : pad
+            let pill = min(cardMaxH - 3, max(40, tray + pad + content + below))
             let sets: [(NSLayoutConstraint?, CGFloat)] = [
-                (tvTopC, tray + pad - chain), (avTvBotC, -pad), (pillHC, pill), (hC, max(43, pill + 3))]
+                (tvTopC, tray + pad - chain), (avQuoteBotC, quoteIsOn ? 6 : pad), (pillHC, pill), (hC, max(43, pill + 3))]
             var moved = false
             for (c, v) in sets {
                 if let c, abs(c.constant - v) > 0.5 { c.constant = v; moved = true }
