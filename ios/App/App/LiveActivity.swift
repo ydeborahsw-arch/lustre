@@ -1,17 +1,25 @@
 import UIKit
 import ActivityKit
 
-/// 1001 她要的"正在想"。灵动岛那一条由 relay 用推送推起、更新,App 这边只做三件事:
-/// 把"推起令牌"交给 relay;每条推起来的活动把自己的更新令牌交给 relay;她一回到 App 就全收掉(她已经在看了)
+/// 1001 她要的"正在想"。灵动岛那一条由 relay 用推送推起、更新,App 这边只做四件事:
+/// 把"推起令牌"交给 relay;每条推起来的活动把自己的更新令牌交给 relay;
+/// 告诉 relay 她在不在 App(切到后台/锁屏 = away,回到前台 = back);她一回到 App 就全收掉(她已经在看了)
 enum LXLive {
     private static var started = false
 
     static func start() {
         guard !started, !LustreConfig.isPreview, !LustreConfig.secret.isEmpty else { return }
         started = true
-        // 用场景的 App 不叫 applicationDidBecomeActive,听通知最稳
-        NotificationCenter.default.addObserver(forName: UIApplication.didBecomeActiveNotification,
-                                               object: nil, queue: .main) { _ in endAll() }
+        // 用场景的 App 不叫 applicationDidBecomeActive,听通知最稳。
+        // relay 那边判断"她在不在"只认这两声:App 从来不发 /app/ping,推送那只钟对它不准
+        let nc = NotificationCenter.default
+        nc.addObserver(forName: UIApplication.didBecomeActiveNotification, object: nil, queue: .main) { _ in
+            endAll()
+            post(["kind": "back"])
+        }
+        nc.addObserver(forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main) { _ in
+            post(["kind": "away"])
+        }
         if #available(iOS 17.2, *) {
             Task {
                 for await data in Activity<LXLiveAttributes>.pushToStartTokenUpdates {
@@ -22,7 +30,14 @@ enum LXLive {
         if #available(iOS 16.2, *) {
             for a in Activity<LXLiveAttributes>.activities { watch(a) }
             Task {
-                for await a in Activity<LXLiveAttributes>.activityUpdates { watch(a) }
+                for await a in Activity<LXLiveAttributes>.activityUpdates {
+                    // 她正看着 App 的时候推起来的(切回来和推送前后脚撞上):不留
+                    if await MainActor.run(body: { UIApplication.shared.applicationState == .active }) {
+                        await a.end(nil, dismissalPolicy: .immediate)
+                        continue
+                    }
+                    watch(a)
+                }
             }
         }
     }
@@ -36,13 +51,10 @@ enum LXLive {
         }
     }
 
-    /// 她回到 App:灵动岛和锁屏上的全收掉,也告诉 relay 这些不用再推了
+    /// 她回到 App:灵动岛和锁屏上的全收掉(relay 收到 back 也会把这些忘掉)
     static func endAll() {
         guard #available(iOS 16.2, *) else { return }
-        let acts = Activity<LXLiveAttributes>.activities
-        guard !acts.isEmpty else { return }
-        for a in acts { Task { await a.end(nil, dismissalPolicy: .immediate) } }
-        post(["kind": "ended"])
+        for a in Activity<LXLiveAttributes>.activities { Task { await a.end(nil, dismissalPolicy: .immediate) } }
     }
 
     private static func hex(_ d: Data) -> String { d.map { String(format: "%02x", $0) }.joined() }

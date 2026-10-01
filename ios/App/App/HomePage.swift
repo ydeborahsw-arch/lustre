@@ -1956,6 +1956,7 @@ final class HomeView: UIView {
             withConfiguration: UIImage.SymbolConfiguration(pointSize: 17, weight: .medium)), for: .normal)
         menuBtn.tintColor = theme.text
         menuBtn.addAction(UIAction { [weak self] _ in self?.onAct?("menu") }, for: .touchUpInside)
+        LXUnreadDot.attach(to: menuBtn, dx: 9, dy: 11)   // 1001:跟聊天页那颗一样,另一条线有没看的就亮
         let title = UILabel()
         title.text = "Home"
         title.font = LXDrawerTint.font(17, wght: 600)

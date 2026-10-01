@@ -247,13 +247,17 @@ final class LXChatData {
         Set((UserDefaults.standard.array(forKey: "lx.deletedIds") as? [NSNumber] ?? []).map { $0.int64Value })
     }()
     private var optimisticSeq: Int64 = 0
-    func addOptimistic(text: String, atts: [LXAtt] = [], cid: String = "", ts: Date = Date()) {
+    func addOptimistic(text: String, atts: [LXAtt] = [], cid: String = "", ts: Date = Date(), quote: [String: Any]? = nil) {
         if !cid.isEmpty, hasOptimistic(cid: cid) { return }
         optimisticSeq += 1
         var m = LXMsg(id: Int64.max - 5000 + optimisticSeq, from: "human", kind: "user", text: text,
                       ts: ts, session: session == "__legacy__" ? "" : session, attCount: atts.count,
                       atts: atts)
         m.cid = cid
+        if let q = quote {
+            let f = Self.quoteFields(q)
+            m.quoteName = f.name; m.quoteText = f.text; m.quoteId = f.id
+        }
         idx[m.id] = m
         order.append(m.id)
         orderSet.insert(m.id)
@@ -371,6 +375,13 @@ final class LXChatData {
         return r
     }
 
+    /// meta.quote → 引用条要的三样。乐观气泡也用它:发出去当下就带着引用条,不用等服务器那条回来再冒出来
+    static func quoteFields(_ q: [String: Any]) -> (name: String, text: String, id: Int64) {
+        (((q["from"] as? String) == "human") ? "我" : "TA",
+         String(((q["text"] as? String) ?? "").prefix(80)),
+         (q["id"] as? NSNumber)?.int64Value ?? 0)
+    }
+
     static func parse(_ d: [String: Any]) -> LXMsg? {
         guard let idn = d["id"] as? NSNumber, let text = d["text"] as? String,
               let from = d["from"] as? String, let kind = d["kind"] as? String,
@@ -400,9 +411,8 @@ final class LXChatData {
         var qName: String? = nil, qText: String? = nil
         var qId: Int64 = 0
         if let q = meta["quote"] as? [String: Any] {
-            qName = ((q["from"] as? String) == "human") ? "我" : "TA"
-            qText = String(((q["text"] as? String) ?? "").prefix(80))
-            qId = (q["id"] as? NSNumber)?.int64Value ?? 0
+            let f = quoteFields(q)
+            qName = f.name; qText = f.text; qId = f.id
         } else if let rt = (meta["reply_to"] as? NSNumber)?.int64Value {
             qName = "引用"
             qText = "较早的一条消息"
@@ -896,6 +906,8 @@ final class LXChatData {
 
     private func merge(_ incoming: [LXMsg]) {
         guard !incoming.isEmpty else { return }
+        // 1001 进了这页的就算她看过:侧边栏这条清零、游标跟上(切走以后只数比这新的)
+        LXUnread.seen(session, upTo: incoming.lazy.map { $0.id }.filter { $0 < Int64.max - 5000 }.max() ?? 0)
         let humanIncoming = incoming.filter { $0.from == "human" }
         var adopted: [Int64: Int64] = [:]
         if !humanIncoming.isEmpty {
@@ -1131,6 +1143,7 @@ final class LXChatData {
                     let (bytes, resp) = try await URLSession.shared.bytes(for: r)
                     guard (resp as? HTTPURLResponse)?.statusCode == 200 else { throw URLError(.badServerResponse) }
                     await s.refetchSince()
+                    await LXUnread.catchUp(except: s.session)
                     for try await line in bytes.lines {
                         if Task.isCancelled { break }
                         guard line.hasPrefix("data:") else { continue }
@@ -1166,7 +1179,9 @@ final class LXChatData {
     func handle(_ obj: [String: Any]) {
         if LXCallSession.shared.isActive { LXCallSession.shared.feed(obj) }
         if obj["type"] == nil, obj["id"] is NSNumber, obj["from"] is String {
-            guard let m = Self.parse(obj), inSession(m) else { return }
+            guard let m = Self.parse(obj) else { return }
+            // 1001 别的线来的:不进这页,只给侧边栏记一笔没看的
+            guard inSession(m) else { LXUnread.note(m); return }
             if detached {
                 liveInbox.removeAll { $0.id == m.id }
                 liveInbox.append(m)
@@ -1611,11 +1626,17 @@ enum LXSoftGlassTuner {
     }
 }
 
-/// 预览 bubbles 路线专用:白天/半月/月夜各一段,每段上两条是薄玻璃(她调的数),下两条是系统 clear 玻璃;
-/// 左边那条在纯色上,右边那条在斜线花纹上。全是样板字,不碰任何真数据。左上一块品红记号:截图脚本认出它才打开看
+/// 预览 bubbles 路线专用:白天/半月/月夜各一段,摆的是真的气泡格子(LXBubbleCell),字全是样板,不碰任何真数据。
+/// 1001 引用窄条:前 25 秒不开头像,之后开头像。每段三条:他的回复(引用她一句很长的话,看省略号)、
+/// 她的短消息(引用比气泡长,条往左伸)、她引用一张图([图片])。每段右半边是斜线花纹,看条在花纹上读不读得清。
+/// 50 秒起换成侧边栏未读样板:每段顶上一条真的顶栏(左边那颗按钮挂着星芒色小点),下面三行真的侧边栏对话行
+/// (没看 3 条 / 正在看的这条 / 没看 128 条显示 99+)。
+/// 记号旁边的小方块报第几步(蓝=不开头像,绿=开头像,橙=侧边栏)。左上一块品红记号:截图脚本认出它才打开看
 final class LXBubbleSampler: UIView {
     static let beacon = CGRect(x: 4, y: 70, width: 20, height: 20)
     private var built = false
+    private var bands: [UIView] = []
+    private let phase = UIView(frame: CGRect(x: 28, y: 70, width: 20, height: 20))
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -1627,57 +1648,92 @@ final class LXBubbleSampler: UIView {
         super.layoutSubviews()
         guard !built, bounds.width > 100 else { return }
         built = true
-        let top: CGFloat = 96, bandH = (bounds.height - top) / 3, side: CGFloat = 60, padH: CGFloat = 12.75, h: CGFloat = 31.75
-        let bands: [(bg: UInt32, fg: UInt32, dark: Bool)] = [(0xF6FBFF, 0x2A3A4D, false), (0x191917, 0xE9E5DC, true), (0x000000, 0xF5F5F5, true)]
-        for (i, b) in bands.enumerated() {
-            let fg = Self.hex(b.fg)
-            let band = UIView(frame: CGRect(x: 0, y: top + CGFloat(i) * bandH, width: bounds.width, height: bandH))
-            band.backgroundColor = Self.hex(b.bg)
-            band.clipsToBounds = true
-            band.overrideUserInterfaceStyle = b.dark ? .dark : .light
-            addSubview(band)
-            addLines(to: band, from: bounds.width / 2, color: fg.withAlphaComponent(0.3))
-            var y: CGFloat = 20
-            for sys in [false, true] {
-                for right in [false, true] {
-                    let l = UILabel()
-                    l.font = .systemFont(ofSize: 14)
-                    l.textColor = fg
-                    l.text = (sys ? "系统玻璃" : "薄玻璃") + (right ? "·花纹上" : "·纯色上")
-                    l.sizeToFit()
-                    let w = ceil(l.bounds.width) + 2 * padH
-                    let f = CGRect(x: right ? bounds.width - side - w : side, y: y, width: w, height: h)
-                    l.frame.origin = CGPoint(x: padH, y: (h - l.bounds.height) / 2)
-                    if sys {
-                        if #available(iOS 26.0, *) {
-                            let e = UIGlassEffect(style: .clear)
-                            e.isInteractive = false
-                            let g = UIVisualEffectView(effect: e)
-                            g.frame = f
-                            g.cornerConfiguration = .uniformCorners(radius: .fixed(h / 2))
-                            g.contentView.addSubview(l)
-                            band.addSubview(g)
-                        }
-                    } else {
-                        let bub = LXBubbleView(frame: f)
-                        bub.maxRadius = 16.8
-                        bub.tailCorner = right
-                        bub.tailLeft = !right
-                        bub.addSubview(l)
-                        bub.setGlass(true, light: LXSoftGlassView.onLight(fg))
-                        band.addSubview(bub)
-                    }
-                    y += h + 14
-                }
-            }
-            // 花纹上一块不剪形状的糊(半径 6):气泡里没糊时,用它分清是糊的那层不工作还是剪形状出了问题
-            let raw = LXBackdropBlurView(frame: CGRect(x: bounds.width - side - 150, y: y + 6, width: 150, height: 40))
-            raw.radius = 6
-            band.addSubview(raw)
-        }
+        build(avatars: false)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 25) { [weak self] in self?.build(avatars: true) }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 50) { [weak self] in self?.buildUnreadDemo() }
         let mark = UIView(frame: Self.beacon)
         mark.backgroundColor = UIColor(red: 1, green: 0, blue: 1, alpha: 1)
         addSubview(mark)
+        addSubview(phase)
+    }
+
+    private func build(avatars: Bool) {
+        bands.forEach { $0.removeFromSuperview() }
+        bands = []
+        phase.backgroundColor = avatars ? .green : .blue
+        let top: CGFloat = 96, bandH = (bounds.height - top) / 3, w = bounds.width
+        for (i, moon) in LXMoonPalette.order.enumerated() {
+            var th = LXChatTheme()
+            th.loadCached(moon)
+            th.avatars = avatars
+            let band = UIView(frame: CGRect(x: 0, y: top + CGFloat(i) * bandH, width: w, height: bandH))
+            band.backgroundColor = th.bg
+            band.clipsToBounds = true
+            band.overrideUserInterfaceStyle = moon == "day" ? .light : .dark
+            insertSubview(band, at: 0)
+            bands.append(band)
+            addLines(to: band, from: w / 2, color: th.aiFg.withAlphaComponent(0.3))
+            var y: CGFloat = 6
+            for m in Self.samples() {
+                let c = LXBubbleCell(style: .default, reuseIdentifier: nil)
+                c.configure(m, showTime: !avatars, tail: true, grouped: false, theme: th, cellW: w,
+                            avaTime: avatars ? .own : .none)
+                c.bounds = CGRect(x: 0, y: 0, width: w, height: 900)
+                c.setNeedsLayout(); c.layoutIfNeeded()
+                let h = ceil(c.systemLayoutSizeFitting(CGSize(width: w, height: UIView.layoutFittingCompressedSize.height),
+                                                       withHorizontalFittingPriority: .required,
+                                                       verticalFittingPriority: .fittingSizeLevel).height)
+                c.frame = CGRect(x: 0, y: y, width: w, height: h)
+                band.addSubview(c)
+                y += h
+            }
+        }
+    }
+
+    private func buildUnreadDemo() {
+        bands.forEach { $0.removeFromSuperview() }
+        bands = []
+        phase.backgroundColor = .orange
+        let top: CGFloat = 96, bandH = (bounds.height - top) / 3, w = bounds.width
+        for (i, moon) in LXMoonPalette.order.enumerated() {
+            var th = LXChatTheme()
+            th.loadCached(moon)
+            let dt = LXDrawerTint.of(moon)
+            let band = UIView(frame: CGRect(x: 0, y: top + CGFloat(i) * bandH, width: w, height: bandH))
+            band.backgroundColor = dt.bg
+            band.clipsToBounds = true
+            band.overrideUserInterfaceStyle = moon == "day" ? .light : .dark
+            insertSubview(band, at: 0)
+            bands.append(band)
+            let hdr = LXHeaderBar(theme: th)
+            hdr.translatesAutoresizingMaskIntoConstraints = true
+            hdr.frame = CGRect(x: 0, y: 0, width: w, height: 56)
+            band.addSubview(hdr)
+            hdr.apply(th)
+            hdr.menuDot?.isHidden = false
+            var y: CGFloat = 64
+            for (title, n, active) in [("样板:另一条线", 3, false), ("样板:正在看的这条", 0, true), ("样板:没看很多", 128, false)] {
+                let row = LXDrawerSessionRow(sid: title, title: title, active: active, pinned: false, cat: title,
+                                             tint: dt, star: LXChatTheme.star(moon))
+                row.setUnread(n)
+                row.translatesAutoresizingMaskIntoConstraints = true
+                row.frame = CGRect(x: 16, y: y, width: min(300, w) - 32, height: 38)
+                band.addSubview(row)
+                y += 39
+            }
+        }
+    }
+
+    private static func samples() -> [LXMsg] {
+        let now = Date()
+        return [
+            LXMsg(id: 9_000_001, from: "ai", kind: "reply", text: "样板:他的回复,一行。", ts: now, session: "", attCount: 0,
+                  quoteName: "我", quoteText: "样板:她先前说的那一句话,故意写得很长很长,看到了七成宽的地方是不是用省略号收尾", quoteId: 1),
+            LXMsg(id: 9_000_002, from: "human", kind: "user", text: "好", ts: now, session: "", attCount: 0,
+                  quoteName: "TA", quoteText: "样板:被引用的那句原话,比气泡长", quoteId: 2),
+            LXMsg(id: 9_000_003, from: "human", kind: "user", text: "样板:引用的是一张图", ts: now, session: "", attCount: 0,
+                  quoteName: "TA", quoteText: "", quoteId: 3),
+        ]
     }
 
     private func addLines(to v: UIView, from x0: CGFloat, color: UIColor) {
@@ -2221,10 +2277,13 @@ final class LXBubbleCell: UITableViewCell {
     let timeL = UILabel()
     let stackV = UIStackView()
     let attsV = UIStackView()
-    let qBlock = UIControl()
-    let qBar = UIView()
-    let qName = UILabel()
-    let qText = UILabel()
+    /// 1001 她:引用照微信挪出气泡,挂在气泡正下方——一条窄条,一行"名字:内容",长了尾巴省略;点它跳回原消息
+    let qStrip = UIControl()
+    let qLine = UILabel()
+    private var qTopC: NSLayoutConstraint!
+    private var qHC: NSLayoutConstraint!
+    private var qLeftC: NSLayoutConstraint!
+    private var qRightC: NSLayoutConstraint!
     var onQuoteTap: ((Int64) -> Void)?
     private var qId: Int64 = 0
     let reactL = UILabel()
@@ -2327,30 +2386,17 @@ final class LXBubbleCell: UITableViewCell {
         reactL.numberOfLines = 0
         reactL.addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(retryTap)))
         contentView.addSubview(bubble)
-        qBlock.layer.cornerRadius = 8
-        qBlock.clipsToBounds = true
-        qBar.isUserInteractionEnabled = false
-        qName.font = .systemFont(ofSize: 11.5, weight: .semibold)
-        qText.font = .systemFont(ofSize: 12.5)
-        qText.lineBreakMode = .byTruncatingTail
-        [qBar, qName, qText].forEach { $0.translatesAutoresizingMaskIntoConstraints = false; qBlock.addSubview($0) }
-        NSLayoutConstraint.activate([
-            qBar.leadingAnchor.constraint(equalTo: qBlock.leadingAnchor),
-            qBar.topAnchor.constraint(equalTo: qBlock.topAnchor),
-            qBar.bottomAnchor.constraint(equalTo: qBlock.bottomAnchor),
-            qBar.widthAnchor.constraint(equalToConstant: 2.5),
-            qName.topAnchor.constraint(equalTo: qBlock.topAnchor, constant: 6),
-            qName.leadingAnchor.constraint(equalTo: qBlock.leadingAnchor, constant: 11),
-            qName.trailingAnchor.constraint(lessThanOrEqualTo: qBlock.trailingAnchor, constant: -10),
-            qText.topAnchor.constraint(equalTo: qName.bottomAnchor, constant: 2),
-            qText.leadingAnchor.constraint(equalTo: qBlock.leadingAnchor, constant: 11),
-            qText.trailingAnchor.constraint(equalTo: qBlock.trailingAnchor, constant: -10),
-            qText.bottomAnchor.constraint(equalTo: qBlock.bottomAnchor, constant: -6),
-        ])
-        qBlock.addTarget(self, action: #selector(quoteTapped), for: .touchUpInside)
-        stackV.addArrangedSubview(qBlock)
-        stackV.setCustomSpacing(7, after: qBlock)
-        qBlock.widthAnchor.constraint(equalTo: stackV.widthAnchor).isActive = true
+        qStrip.translatesAutoresizingMaskIntoConstraints = false
+        qStrip.layer.cornerCurve = .continuous
+        qStrip.clipsToBounds = true
+        qStrip.isHidden = true
+        qLine.translatesAutoresizingMaskIntoConstraints = false
+        qLine.lineBreakMode = .byTruncatingTail
+        qLine.isUserInteractionEnabled = false
+        qLine.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        qStrip.addSubview(qLine)
+        qStrip.addTarget(self, action: #selector(quoteTapped), for: .touchUpInside)
+        contentView.addSubview(qStrip)
         stackV.addArrangedSubview(attsV)
         stackV.addArrangedSubview(label)
         label.isUserInteractionEnabled = true
@@ -2393,7 +2439,17 @@ final class LXBubbleCell: UITableViewCell {
         timeRightC = timeL.trailingAnchor.constraint(equalTo: bubble.trailingAnchor, constant: -2)
         timeLeftC.priority = UILayoutPriority(999); timeRightC.priority = UILayoutPriority(1)
         timeHC = timeL.heightAnchor.constraint(equalToConstant: 10)
-        timeGapC = timeL.topAnchor.constraint(equalTo: bubble.bottomAnchor, constant: 4)
+        // 引用条挂在气泡下面;没有引用时它高 0、贴着气泡底,下面这些照旧等于挂在气泡底上
+        qTopC = qStrip.topAnchor.constraint(equalTo: bubble.bottomAnchor, constant: 0)
+        qHC = qStrip.heightAnchor.constraint(equalToConstant: 0)
+        qLeftC = qStrip.leadingAnchor.constraint(equalTo: bubble.leadingAnchor)
+        qRightC = qStrip.trailingAnchor.constraint(equalTo: bubble.trailingAnchor)
+        qLeftC.priority = UILayoutPriority(999); qRightC.priority = UILayoutPriority(1)
+        // 最宽跟气泡一样:屏宽 72%,也不越过两边头像让出的位置;字比这长就尾巴省略
+        let qMax72 = qStrip.widthAnchor.constraint(lessThanOrEqualTo: contentView.widthAnchor, multiplier: 0.72)
+        let qMaxAva = qStrip.widthAnchor.constraint(lessThanOrEqualTo: contentView.widthAnchor, constant: -2 * Self.avaInset)
+        qMax72.priority = UILayoutPriority(999); qMaxAva.priority = UILayoutPriority(999)
+        timeGapC = timeL.topAnchor.constraint(equalTo: qStrip.bottomAnchor, constant: 4)
         timeAvaLeftC = timeL.leadingAnchor.constraint(equalTo: avatarV.leadingAnchor)
         timeAvaLeftC.priority = UILayoutPriority(1)
         timeWC = timeL.widthAnchor.constraint(equalToConstant: Self.avaSize)
@@ -2403,10 +2459,10 @@ final class LXBubbleCell: UITableViewCell {
         topC = bubble.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 7)
         timeBotC = contentView.bottomAnchor.constraint(greaterThanOrEqualTo: timeL.bottomAnchor, constant: 1)
         botReactC = contentView.bottomAnchor.constraint(greaterThanOrEqualTo: reactL.bottomAnchor, constant: 1)
-        botBubbleC = contentView.bottomAnchor.constraint(greaterThanOrEqualTo: bubble.bottomAnchor, constant: 1)
+        botBubbleC = contentView.bottomAnchor.constraint(greaterThanOrEqualTo: qStrip.bottomAnchor, constant: 1)
         reactGapC = reactL.topAnchor.constraint(equalTo: timeL.bottomAnchor, constant: 0)
         reactGapC.priority = UILayoutPriority(999)
-        reactAvaTopC = reactL.topAnchor.constraint(equalTo: bubble.bottomAnchor, constant: 0)
+        reactAvaTopC = reactL.topAnchor.constraint(equalTo: qStrip.bottomAnchor, constant: 0)
         reactAvaTopC.priority = UILayoutPriority(1)
         reactHC = reactL.heightAnchor.constraint(equalToConstant: 0)
         reactLeftC = reactL.leadingAnchor.constraint(equalTo: bubble.leadingAnchor, constant: 2)
@@ -2424,6 +2480,11 @@ final class LXBubbleCell: UITableViewCell {
             botReactC,
             timeBotC,
             botBubbleC,
+            qTopC, qHC, qLeftC, qRightC,
+            qMax72, qMaxAva,
+            qLine.leadingAnchor.constraint(equalTo: qStrip.leadingAnchor, constant: 10),
+            qLine.trailingAnchor.constraint(equalTo: qStrip.trailingAnchor, constant: -10),
+            qLine.centerYAnchor.constraint(equalTo: qStrip.centerYAnchor),
             avaL, avaR, avaBottomC,
             avatarV.topAnchor.constraint(equalTo: bubble.topAnchor, constant: -Self.avaCenterOff),
             avatarV.widthAnchor.constraint(equalToConstant: Self.avaSize),
@@ -2595,36 +2656,34 @@ final class LXBubbleCell: UITableViewCell {
         // 0925 她的单:头像模式下气泡之间的空固定(气泡变宽变成两行也不变窄)——空挂在每行气泡(或表情章)下面;
         // 行顶统一是头像顶(气泡再往下 avaLift),换人说话也不多加空(参考图每行一样高)
         botReactC.constant = av ? Self.avaRowGap : 1
-        botBubbleC.constant = av ? Self.avaRowGap : 1
+        // 不开头像时行与行挨得近:引用条下面多留一点,让它看得出是上面那条的,不是下一条的
+        botBubbleC.constant = av ? Self.avaRowGap : (m.quoteText != nil ? 8 : 1)
         topC.constant = av ? Self.avaLift : (afterThink ? 2 : (grouped ? (mine ? 4 : 0.5) : 7))
         attsV.arrangedSubviews.forEach { $0.removeFromSuperview() }
         attsV.isHidden = m.atts.isEmpty
         label.isHidden = m.text.isEmpty
         if let qt = m.quoteText {
-            qBlock.isHidden = false
+            qStrip.isHidden = false
             qId = m.quoteId
             // 0925:引用条的名字读备注(原来引用他时写死 "Lustre")
             let qRaw = (m.quoteName == "TA") ? LXNick.of(session: m.session) : (m.quoteName ?? "引用")
-            qName.text = qRaw == "__LX_YAN__" ? LXNick.yan : qRaw
-            qText.text = qt.isEmpty ? "[图片]" : qt
-            // 头像模式正文 14:引用条的字同比收(11.5/12.5 × 14/15),不然引用比正文还大
-            qName.font = .systemFont(ofSize: av ? 10.7 : 11.5, weight: .semibold)
-            qText.font = .systemFont(ofSize: av ? 11.7 : 12.5)
-            qName.textColor = theme.accentText
-            qText.textColor = theme.aiFg.withAlphaComponent(0.75)
-            if mine {
-                qBlock.backgroundColor = UIColor(white: 1, alpha: 0.55)
-                qBar.backgroundColor = theme.accent
-                qText.textColor = UIColor(white: 0.15, alpha: 0.8)
-                qName.textColor = UIColor(red: 0.28, green: 0.42, blue: 0.55, alpha: 1)
-            } else {
-                qBlock.backgroundColor = UIColor(red: 0.47, green: 0.55, blue: 0.65, alpha: 0.10)
-                qBar.backgroundColor = theme.accent
-            }
+            let who = qRaw == "__LX_YAN__" ? LXNick.yan : qRaw
+            let body = qt.isEmpty ? "[图片]" : qt.replacingOccurrences(of: "\n", with: " ")
+            // 颜色跟这条的字走(白天黑、半月暖白、月夜白;不开头像时他的字跟壁纸深浅变,条也跟着变),只淡一档:
+            // 字六成,底是很薄的一层灰/白——看着是挂在气泡下面的附属,不像另一条消息。头像模式字号同比收(12.5 × 14/15)
+            let ink = mine ? theme.meFg : theme.aiFg
+            qLine.attributedText = NSAttributedString(string: who + "：" + body, attributes: [
+                .font: Self.bodyFont(size: av ? 11.7 : 12.5), .foregroundColor: ink.withAlphaComponent(0.6)])
+            qStrip.backgroundColor = LXSoftGlassView.onLight(ink) ? UIColor(white: 0, alpha: 0.05) : UIColor(white: 1, alpha: 0.08)
+            let h: CGFloat = av ? 24 : 26
+            qHC.constant = h
+            qTopC.constant = 4
+            qStrip.layer.cornerRadius = h / 2
         } else {
-            qBlock.isHidden = true
-            qName.text = nil
-            qText.text = nil
+            qStrip.isHidden = true
+            qLine.attributedText = nil
+            qHC.constant = 0
+            qTopC.constant = 0
             qId = 0
         }
         let fg = mine ? theme.meFg : theme.aiFg
@@ -2680,6 +2739,7 @@ final class LXBubbleCell: UITableViewCell {
             timeL.textAlignment = .right
             reactL.textAlignment = .right
             reactLeftC.priority = UILayoutPriority(1); reactRightC.priority = UILayoutPriority(999)
+            qLeftC.priority = UILayoutPriority(1); qRightC.priority = UILayoutPriority(999)
             if cellW > 10 {
                 bubWC.constant = Self.measuredWidth(m, cellW: cellW, attOnly: attOnly,
                                                     maxWOverride: av ? (cellW - 2 * Self.avaInset) : nil, av: av)
@@ -2700,6 +2760,9 @@ final class LXBubbleCell: UITableViewCell {
             reactL.textAlignment = .left
             reactLeftC.priority = UILayoutPriority(999); reactRightC.priority = UILayoutPriority(1)
             leftC.priority = UILayoutPriority(999)
+            // 没气泡时他的字从左边 2 开始,条的左边跟字对齐
+            qLeftC.priority = UILayoutPriority(999); qRightC.priority = UILayoutPriority(1)
+            qLeftC.constant = boxed ? 0 : 2
             if boxed {
                 let p = Self.avaPadH
                 padT.constant = Self.avaPadT; padB.constant = -Self.avaPadB; padL.constant = p; padR.constant = -p
@@ -2792,7 +2855,6 @@ final class LXBubbleCell: UITableViewCell {
                 w = max(w, innerMax)
             }
         }
-        if m.quoteText != nil { w = max(w, innerMax) }
         return min(maxW, w + pad)
     }
 
@@ -3701,6 +3763,8 @@ final class LXHeaderBar: UIView {
         fillClip.layer.addSublayer(fillL)
         pill.insertSubview(fillClip, at: 0)
         addSubview(menuBtn); addSubview(pill); addSubview(moreBtn)
+        // 1001 她:另一条线有没看的,这颗按钮右上角亮一颗星芒色小点
+        menuDot = LXUnreadDot.attach(to: menuBtn, dx: 5, dy: 5)
         menuBtn.addAction(UIAction { [weak self] _ in self?.onTap?("menu") }, for: .touchUpInside)
         pill.addAction(UIAction { [weak self] _ in self?.onTap?("status") }, for: .touchUpInside)
         moreBtn.addAction(UIAction { [weak self] _ in self?.onTap?("more") }, for: .touchUpInside)
@@ -3773,9 +3837,11 @@ final class LXHeaderBar: UIView {
         pill.layer.borderColor = t.hdrRing.cgColor
         statusL.textColor = t.pillFg
         statusL.font = LXThinkBodyCell.sysFont(t.statusFs)
+        menuDot?.refresh()
         syncGlass(t)
     }
 
+    private(set) var menuDot: LXUnreadDot?
     private var glassVs: [UIView] = []
     private var inkOverride: UIColor?
     /// 0926 她:顶上这三颗玻璃也跟输入栏一样按壁纸深浅走(浅壁纸 = 浅玻璃),没设自定义壁纸照主题。
@@ -4999,14 +5065,14 @@ public class ChatListPlugin: CAPPlugin, CAPBridgedPlugin, UITableViewDataSource,
         DispatchQueue.main.async { self.enableOnMain(call) }
     }
 
-    func echo(text: String, atts: [LXAtt], session: String, cid: String = "", ts: Date = Date()) {
+    func echo(text: String, atts: [LXAtt], session: String, cid: String = "", ts: Date = Date(), quote: [String: Any]? = nil) {
         DispatchQueue.main.async {
             if self.data.detached { self.data.returnToLive() }
             self.stickDisarmed = false
             self.forceStick = true
             let sidOK = session.isEmpty || session == self.data.session
             if (!text.isEmpty || !atts.isEmpty) && sidOK {
-                self.data.addOptimistic(text: text, atts: atts, cid: cid, ts: ts)
+                self.data.addOptimistic(text: text, atts: atts, cid: cid, ts: ts, quote: quote)
             }
             if let t = self.table {
                 self.pinToBottom(t)
@@ -5615,6 +5681,7 @@ public class ChatListPlugin: CAPPlugin, CAPBridgedPlugin, UITableViewDataSource,
             if let t = self.table {
                 t.isHidden = true
                 self.data.switchSession(sid)
+                LXUnread.seen(sid)
                 LXOutbox.shared.reinject(session: self.data.session)
                 self.pinToBottom(t)
                 DispatchQueue.main.async { [weak self] in
@@ -5881,26 +5948,6 @@ public class ChatListPlugin: CAPPlugin, CAPBridgedPlugin, UITableViewDataSource,
         let page = LXBubbleSampler(frame: win.bounds)
         page.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         win.addSubview(page)
-        // 0926 糊底定死验一遍:6 秒两套 Blur 调到 6(蓝);26 秒、38 秒各把整页摘下窗口 0.5 秒再放回
-        // (绿、黄,等于气泡滑出屏幕再回来);46 秒调到 2(橙),看数变了糊也跟着变。
-        // 记号旁边第一个小方块报第几步;第二个:青=糊的那层系统认,红=不认
-        let phase = UIView(frame: CGRect(x: 28, y: 70, width: 20, height: 20))
-        page.addSubview(phase)
-        let probe = UIView(frame: CGRect(x: 52, y: 70, width: 20, height: 20))
-        probe.backgroundColor = LXBackdropBlurView.available ? .cyan : .red
-        page.addSubview(probe)
-        func setAll(_ r: CGFloat) {
-            for light in [true, false] { var k = LXSoftGlassStore.get(light); k.blur = r; LXSoftGlassStore.set(k, light: light) }
-        }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 6) { setAll(6); phase.backgroundColor = .blue }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 46) { setAll(2); phase.backgroundColor = .orange }
-        for (at, color) in [(26.0, UIColor.green), (38.0, UIColor.yellow)] {
-            DispatchQueue.main.asyncAfter(deadline: .now() + at) { [weak page] in
-                guard let p = page else { return }
-                p.removeFromSuperview()
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { win.addSubview(p); phase.backgroundColor = color }
-            }
-        }
         Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self, weak page] tm in
             guard let s = self, let p = page else { tm.invalidate(); return }
             s.table?.isHidden = true

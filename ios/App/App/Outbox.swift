@@ -185,7 +185,7 @@ final class LXOutbox {
                                   "uploaded": [Any](repeating: NSNull(), count: metas.count), "ts": ts]
         if let quote { job["quote"] = quote }
         saveJob(job)
-        plug.echo(text: text, atts: echoAtts(job), session: sid, cid: cid)
+        plug.echo(text: text, atts: echoAtts(job), session: sid, cid: cid, quote: quote)
         run(cid)
     }
 
@@ -206,7 +206,8 @@ final class LXOutbox {
             }
             if !plug.data.hasOptimistic(cid: cid) {
                 let ts = Date(timeIntervalSince1970: (j["ts"] as? Double) ?? Date().timeIntervalSince1970)
-                plug.echo(text: (j["text"] as? String) ?? "", atts: echoAtts(j), session: sid, cid: cid, ts: ts)
+                plug.echo(text: (j["text"] as? String) ?? "", atts: echoAtts(j), session: sid, cid: cid, ts: ts,
+                          quote: j["quote"] as? [String: Any])
                 if failedCids.contains(cid) { plug.echoFailed(cid: cid, failed: true) }
             }
             if !running.contains(cid) && !failedCids.contains(cid) { run(cid) }

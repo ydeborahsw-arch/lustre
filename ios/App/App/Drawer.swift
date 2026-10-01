@@ -542,7 +542,11 @@ final class LXDrawerSessionRow: UIControl {
     let sid: String, cat: String, pinned: Bool
     private let nameL = UILabel(), pinV = UIImageView()
     private let activeBg: UIColor?
-    init(sid: String, title: String, active: Bool, pinned: Bool, cat: String, tint: LXDrawerTint) {
+    /// 1001 最右边没看的条数:星芒色小胶囊、深色字,没有就收成 0 宽
+    private let countL = UILabel()
+    private var countW: NSLayoutConstraint!
+    private var countGap: NSLayoutConstraint!
+    init(sid: String, title: String, active: Bool, pinned: Bool, cat: String, tint: LXDrawerTint, star: UIColor) {
         self.sid = sid; self.cat = cat; self.pinned = pinned
         activeBg = active ? tint.segTrack : nil
         super.init(frame: .zero)
@@ -553,23 +557,163 @@ final class LXDrawerSessionRow: UIControl {
         nameL.translatesAutoresizingMaskIntoConstraints = false
         nameL.font = LXDrawerTint.font(14, wght: 500); nameL.textColor = tint.text; nameL.text = title
         nameL.lineBreakMode = .byTruncatingTail
+        nameL.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         pinV.translatesAutoresizingMaskIntoConstraints = false
         pinV.image = LXDrawerIcons.image("pin", LXDrawerIcons.pin, size: 13, stroke: 0)
         pinV.tintColor = tint.faint; pinV.isHidden = !pinned
-        for v in [nameL, pinV] { v.isUserInteractionEnabled = false; addSubview(v) }
+        countL.translatesAutoresizingMaskIntoConstraints = false
+        countL.font = LXDrawerTint.font(12, wght: 600)
+        countL.textAlignment = .center
+        countL.backgroundColor = star
+        countL.textColor = UIColor(red: 0x1D/255, green: 0x1D/255, blue: 0x1F/255, alpha: 1)
+        countL.layer.cornerRadius = 9
+        countL.layer.cornerCurve = .continuous
+        countL.clipsToBounds = true
+        for v in [nameL, pinV, countL] { v.isUserInteractionEnabled = false; addSubview(v) }
+        countW = countL.widthAnchor.constraint(equalToConstant: 0)
+        countGap = countL.leadingAnchor.constraint(equalTo: pinV.trailingAnchor, constant: 0)
         NSLayoutConstraint.activate([
             nameL.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
             nameL.centerYAnchor.constraint(equalTo: centerYAnchor),
             pinV.leadingAnchor.constraint(equalTo: nameL.trailingAnchor, constant: 10),
-            pinV.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
             pinV.centerYAnchor.constraint(equalTo: centerYAnchor),
             pinV.widthAnchor.constraint(equalToConstant: pinned ? 13 : 0),
             pinV.heightAnchor.constraint(equalToConstant: 13),
+            countGap, countW,
+            countL.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
+            countL.centerYAnchor.constraint(equalTo: centerYAnchor),
+            countL.heightAnchor.constraint(equalToConstant: 18),
         ])
+        setUnread(0)
     }
     required init?(coder: NSCoder) { fatalError() }
+
+    func setUnread(_ n: Int) {
+        countL.isHidden = n <= 0
+        countL.text = n <= 0 ? nil : (n > 99 ? "99+" : "\(n)")
+        let tw = countL.text.map { ceil(($0 as NSString).size(withAttributes: [.font: countL.font!]).width) } ?? 0
+        countW.constant = n <= 0 ? 0 : max(18, tw + 12)
+        countGap.constant = n <= 0 ? 0 : 8
+    }
     override var isHighlighted: Bool {
         didSet { backgroundColor = isHighlighted ? UIColor(white: 0, alpha: 0.04) : (activeBg ?? .clear) }
+    }
+}
+
+/// 1001 她:一边跟这边搞项目、一边跟那边聊天,另一边回了 App 里没有提醒,怕耽误 →
+/// 侧边栏每条对话右边显示没看的条数,打开侧边栏的按钮上一颗星芒色小点(哪条有没看的就亮)。
+/// 只数 AI 的回复和拍一拍:她自己的、思考卡、各种事件都不算。按消息编号往后数(同一条推两遍不会数两次),
+/// 打开那条对话就清零。App 在后台那阵子另一边来的,回到前台推流连上以后按编号补数。只在主线程碰
+enum LXUnread {
+    static let changed = Notification.Name("lx.unread.changed")
+    static let lines = ["__legacy__", "yan-main"]
+    private static let countsKey = "lx.unread.counts", markKey = "lx.unread.mark"
+    private static var counts: [String: Int] =
+        (UserDefaults.standard.dictionary(forKey: countsKey) as? [String: Int]) ?? [:]
+    /// 每条线数到哪一条了:比它新的才可能算没看
+    private static var mark: [String: Int64] =
+        ((UserDefaults.standard.dictionary(forKey: markKey) as? [String: NSNumber]) ?? [:]).mapValues { $0.int64Value }
+
+    static func key(_ session: String) -> String { session.isEmpty ? "__legacy__" : session }
+    static func count(_ sid: String) -> Int { counts[key(sid)] ?? 0 }
+    static var any: Bool { counts.values.contains { $0 > 0 } }
+
+    private static func countable(_ m: LXMsg) -> Bool {
+        m.from == "ai" && (m.kind == "pat" || (m.kind == "reply" && (!m.text.isEmpty || m.attCount > 0)))
+    }
+
+    /// 别的线来了一条:推流里来的都是新的;补数时按编号从小到大一条条喂
+    static func note(_ m: LXMsg) {
+        guard m.id < Int64.max - 5000 else { return }
+        let s = key(m.session)
+        if let base = mark[s], m.id <= base { return }
+        mark[s] = m.id
+        let hit = countable(m)
+        if hit { counts[s, default: 0] += 1 }
+        save(changed: hit)
+    }
+
+    /// 她正看着这条线:清零,游标挪到她看到的最新一条
+    static func seen(_ session: String, upTo id: Int64 = 0) {
+        guard Thread.isMainThread else { DispatchQueue.main.async { seen(session, upTo: id) }; return }
+        let s = key(session)
+        let cleared = (counts[s] ?? 0) != 0
+        let moved = id > 0 && id < Int64.max - 5000 && id > (mark[s] ?? 0)
+        guard cleared || moved else { return }
+        if cleared { counts[s] = 0 }
+        if moved { mark[s] = id }
+        save(changed: cleared)
+    }
+
+    /// 推流(重)连上时补数:App 不在前台那阵子别的线来的;从没数过的线先只记一个起点,不数旧账
+    static func catchUp(except open: String) async {
+        let openKey = key(open)
+        for s in lines where s != openKey {
+            let base = await MainActor.run { mark[s] }
+            let path = base.map { "/app/history?since=\($0)&limit=200&session_id=\(s)" }
+                ?? "/app/history?latest=1&limit=1&session_id=\(s)"
+            guard let arr = await fetch(path) else { continue }
+            let ms = arr.compactMap { LXChatData.parse($0) }.filter { key($0.session) == s }.sorted { $0.id < $1.id }
+            await MainActor.run {
+                if base == nil {
+                    if let last = ms.last, last.id > (mark[s] ?? 0) { mark[s] = last.id; save(changed: false) }
+                } else {
+                    ms.forEach { note($0) }
+                }
+            }
+        }
+    }
+
+    private static func fetch(_ path: String) async -> [[String: Any]]? {
+        guard let u = URL(string: LustreConfig.apiBase + path) else { return nil }
+        var r = URLRequest(url: u, timeoutInterval: 15)
+        r.setValue("Bearer " + LustreConfig.secret, forHTTPHeaderField: "Authorization")
+        guard let (d, resp) = try? await URLSession.shared.data(for: r),
+              (resp as? HTTPURLResponse)?.statusCode == 200,
+              let obj = (try? JSONSerialization.jsonObject(with: d)) as? [String: Any] else { return nil }
+        return obj["messages"] as? [[String: Any]]
+    }
+
+    private static func save(changed: Bool) {
+        UserDefaults.standard.set(counts, forKey: countsKey)
+        UserDefaults.standard.set(mark.mapValues { NSNumber(value: $0) }, forKey: markKey)
+        if changed { NotificationCenter.default.post(name: Self.changed, object: nil) }
+    }
+}
+
+/// 1001 她:打开侧边栏那颗按钮右上角一颗星芒色小点,哪条线有没看的就亮(星芒色跟月相:白天、月夜浅蓝,半月橙)
+final class LXUnreadDot: UIView {
+    private var obs: NSObjectProtocol?
+    init(size: CGFloat) {
+        super.init(frame: CGRect(x: 0, y: 0, width: size, height: size))
+        translatesAutoresizingMaskIntoConstraints = false
+        isUserInteractionEnabled = false
+        layer.cornerRadius = size / 2
+        widthAnchor.constraint(equalToConstant: size).isActive = true
+        heightAnchor.constraint(equalToConstant: size).isActive = true
+        obs = NotificationCenter.default.addObserver(forName: LXUnread.changed, object: nil, queue: .main) { [weak self] _ in
+            self?.refresh()
+        }
+        refresh()
+    }
+    required init?(coder: NSCoder) { fatalError() }
+    deinit { if let o = obs { NotificationCenter.default.removeObserver(o) } }
+
+    func refresh() {
+        backgroundColor = LXChatTheme.star(RPSpec.moonState)
+        isHidden = !LXUnread.any
+    }
+
+    /// 圆点中心钉在按钮右上角往里 (dx, dy)
+    @discardableResult
+    static func attach(to b: UIView, size: CGFloat = 8, dx: CGFloat, dy: CGFloat) -> LXUnreadDot {
+        let d = LXUnreadDot(size: size)
+        b.addSubview(d)
+        NSLayoutConstraint.activate([
+            d.centerXAnchor.constraint(equalTo: b.trailingAnchor, constant: -dx),
+            d.centerYAnchor.constraint(equalTo: b.topAnchor, constant: dy),
+        ])
+        return d
     }
 }
 
@@ -673,6 +817,10 @@ final class LXDrawerView: UIView {
     private(set) var sessionsHead: UIView?
     private(set) var pill: UIView?
     private(set) var gear: UIView?
+    private var moon = "moon"
+    /// 1001 没看的条数就地改,不为它整个侧边栏重建
+    private var sessionRows: [String: LXDrawerSessionRow] = [:]
+    private var unreadObs: NSObjectProtocol?
 
     override class var layerClass: AnyClass { CAGradientLayer.self }
 
@@ -710,8 +858,13 @@ final class LXDrawerView: UIView {
             bar.heightAnchor.constraint(equalToConstant: 48),
             barBottomC,
         ])
+        unreadObs = NotificationCenter.default.addObserver(forName: LXUnread.changed, object: nil, queue: .main) { [weak self] _ in
+            guard let s = self else { return }
+            for (sid, row) in s.sessionRows { row.setUnread(LXUnread.count(sid)) }
+        }
     }
     required init?(coder: NSCoder) { fatalError() }
+    deinit { if let o = unreadObs { NotificationCenter.default.removeObserver(o) } }
 
     override func safeAreaInsetsDidChange() {
         super.safeAreaInsetsDidChange()
@@ -735,6 +888,7 @@ final class LXDrawerView: UIView {
         guard newSig != sig else { return }
         sig = newSig
         tint = LXDrawerTint.of(moon)
+        self.moon = moon
         spec = s
         pageW.constant = s.w
         if let g = layer as? CAGradientLayer {
@@ -751,6 +905,7 @@ final class LXDrawerView: UIView {
         bar.subviews.forEach { $0.removeFromSuperview() }
         titleL = nil; firstItem = nil; sessionsHead = nil; pill = nil; gear = nil
         noteTextL = nil; noteMoreL = nil; noteExpanded = false
+        sessionRows = [:]
 
         let head = UIView(); head.translatesAutoresizingMaskIntoConstraints = false
         head.heightAnchor.constraint(equalToConstant: 8).isActive = true
@@ -931,7 +1086,10 @@ final class LXDrawerView: UIView {
         let rows = UIStackView(); rows.translatesAutoresizingMaskIntoConstraints = false
         rows.axis = .vertical; rows.spacing = 1
         for s in spec.sessions {
-            let row = LXDrawerSessionRow(sid: s.sid, title: s.title, active: s.active, pinned: s.pinned, cat: s.cat, tint: tint)
+            let row = LXDrawerSessionRow(sid: s.sid, title: s.title, active: s.active, pinned: s.pinned, cat: s.cat,
+                                         tint: tint, star: LXChatTheme.star(moon))
+            row.setUnread(LXUnread.count(s.sid))
+            sessionRows[s.sid] = row
             let sid = s.sid
             row.addAction(UIAction { [weak self] _ in self?.onAct?("session", sid) }, for: .touchUpInside)
             let lp = UILongPressGestureRecognizer(target: self, action: #selector(rowLongPress(_:)))

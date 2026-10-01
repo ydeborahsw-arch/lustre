@@ -2310,7 +2310,9 @@ public class NativeInputPlugin: CAPPlugin, CAPBridgedPlugin, UITextViewDelegate 
             ?? LXUsage.model(for: sid)
         let eff = UserDefaults.standard.string(forKey: effortKey) ?? "max"
         let models: [[String: Any]] = modelNames.map {
-            ["val": $0.val, "name": $0.name, "active": $0.val == cur.replacingOccurrences(of: "[1m]", with: "")]
+            // 两边都去掉 [1m] 再比:列表里的 4.6 带 [1m],只去一边它永远勾不上
+            ["val": $0.val, "name": $0.name,
+             "active": $0.val.replacingOccurrences(of: "[1m]", with: "") == cur.replacingOccurrences(of: "[1m]", with: "")]
         }
         let efforts: [[String: Any]] = effortNames.map {
             ["val": $0.val, "name": $0.name, "active": $0.val == eff]
