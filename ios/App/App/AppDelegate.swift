@@ -71,6 +71,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
                 DispatchQueue.main.async { application.registerForRemoteNotifications() }
             }
             LXCallCenter.shared.start()
+            LXLive.start()   // 1001 灵动岛"正在想":把令牌交给 relay
         }
         return true
     }
@@ -182,6 +183,20 @@ enum LXPushRoute {
         }
         pending = sid
         deliver()
+    }
+
+    /// 1001:点灵动岛/锁屏上的"正在想"进那条线(lustre://open?s=<线>,空=主线),跟点通知同一条路
+    static func open(url: URL) -> Bool {
+        guard url.scheme == "lustre", url.host == "open" else { return false }
+        let s = URLComponents(url: url, resolvingAgainstBaseURL: false)?
+            .queryItems?.first(where: { $0.name == "s" })?.value ?? ""
+        let sid = s.isEmpty ? "__legacy__" : s
+        if ChatListPlugin.live?.container == nil {
+            UserDefaults.standard.set(sid, forKey: "lx.sessionPick")
+        }
+        pending = sid
+        deliver()
+        return true
     }
 
     private static func deliver(_ attempt: Int = 0) {

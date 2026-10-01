@@ -33,7 +33,47 @@
 		504EC3121FED79650016851F /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 504EC3101FED79650016851F /* LaunchScreen.storyboard */; };
 		50B271D11FEDC1A000F3C39B /* public in Resources */ = {isa = PBXBuildFile; fileRef = 50B271D01FEDC1A000F3C39B /* public */; };
 		9582B6832FE993A70072D4E8 /* SceneDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9582B6822FE993A50072D4E8 /* SceneDelegate.swift */; };
+		AA11BEEF0000000000D10004 /* ShareViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA11BEEF0000000000D10002 /* ShareViewController.swift */; };
+		AA11BEEF0000000000D10005 /* LustreShare.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = AA11BEEF0000000000D10001 /* LustreShare.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		AA11BEEF0000000000D20004 /* LustreLive.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA11BEEF0000000000D20002 /* LustreLive.swift */; };
+		AA11BEEF0000000000D20005 /* LustreLive.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = AA11BEEF0000000000D20001 /* LustreLive.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		AA11BEEF0000000000D20011 /* livestar.png in Resources */ = {isa = PBXBuildFile; fileRef = AA11BEEF0000000000D20010 /* livestar.png */; };
+		AA11BEEF0000000000D20012 /* LXLiveAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA11BEEF0000000000D30001 /* LXLiveAttributes.swift */; };
+		AA11BEEF0000000000D30002 /* LXLiveAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA11BEEF0000000000D30001 /* LXLiveAttributes.swift */; };
+		AA11BEEF0000000000D30004 /* LiveActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA11BEEF0000000000D30003 /* LiveActivity.swift */; };
 /* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		AA11BEEF0000000000D1000E /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 504EC2FC1FED79650016851F /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = AA11BEEF0000000000D10007;
+			remoteInfo = LustreShare;
+		};
+		AA11BEEF0000000000D2000E /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 504EC2FC1FED79650016851F /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = AA11BEEF0000000000D20007;
+			remoteInfo = LustreLive;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		AA11BEEF0000000000D30005 /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				AA11BEEF0000000000D10005 /* LustreShare.appex in Embed Foundation Extensions */,
+				AA11BEEF0000000000D20005 /* LustreLive.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
 		2FAD9762203C412B000D30F8 /* config.xml */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = config.xml; sourceTree = "<group>"; };
@@ -65,6 +105,15 @@
 		50B271D01FEDC1A000F3C39B /* public */ = {isa = PBXFileReference; lastKnownFileType = folder; path = public; sourceTree = "<group>"; };
 		9582B6822FE993A50072D4E8 /* SceneDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SceneDelegate.swift; sourceTree = "<group>"; };
 		958DCC722DB07C7200EA8C5F /* debug.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; name = debug.xcconfig; path = ../debug.xcconfig; sourceTree = SOURCE_ROOT; };
+		AA11BEEF0000000000D10001 /* LustreShare.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = LustreShare.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		AA11BEEF0000000000D10002 /* ShareViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareViewController.swift; sourceTree = "<group>"; };
+		AA11BEEF0000000000D10003 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		AA11BEEF0000000000D20001 /* LustreLive.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = LustreLive.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		AA11BEEF0000000000D20002 /* LustreLive.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LustreLive.swift; sourceTree = "<group>"; };
+		AA11BEEF0000000000D20003 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		AA11BEEF0000000000D20010 /* livestar.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = livestar.png; sourceTree = "<group>"; };
+		AA11BEEF0000000000D30001 /* LXLiveAttributes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LXLiveAttributes.swift; sourceTree = "<group>"; };
+		AA11BEEF0000000000D30003 /* LiveActivity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveActivity.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -76,6 +125,20 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		AA11BEEF0000000000D10009 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		AA11BEEF0000000000D20009 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -84,6 +147,8 @@
 			children = (
 				958DCC722DB07C7200EA8C5F /* debug.xcconfig */,
 				504EC3061FED79650016851F /* App */,
+				AA11BEEF0000000000D10006 /* LustreShare */,
+				AA11BEEF0000000000D20006 /* LustreLive */,
 				504EC3051FED79650016851F /* Products */,
 			);
 			sourceTree = "<group>";
@@ -92,6 +157,8 @@
 			isa = PBXGroup;
 			children = (
 				504EC3041FED79650016851F /* App.app */,
+				AA11BEEF0000000000D10001 /* LustreShare.appex */,
+				AA11BEEF0000000000D20001 /* LustreLive.appex */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -100,6 +167,8 @@
 			isa = PBXGroup;
 			children = (
 				9582B6822FE993A50072D4E8 /* SceneDelegate.swift */,
+				AA11BEEF0000000000D30001 /* LXLiveAttributes.swift */,
+				AA11BEEF0000000000D30003 /* LiveActivity.swift */,
 				50379B222058CBB4000EE86E /* capacitor.config.json */,
 				504EC3071FED79650016851F /* AppDelegate.swift */,
 				AA11BEEF000000000000FE01 /* HealthPlugin.swift */,
@@ -130,6 +199,25 @@
 			path = App;
 			sourceTree = "<group>";
 		};
+		AA11BEEF0000000000D10006 /* LustreShare */ = {
+			isa = PBXGroup;
+			children = (
+				AA11BEEF0000000000D10002 /* ShareViewController.swift */,
+				AA11BEEF0000000000D10003 /* Info.plist */,
+			);
+			path = LustreShare;
+			sourceTree = "<group>";
+		};
+		AA11BEEF0000000000D20006 /* LustreLive */ = {
+			isa = PBXGroup;
+			children = (
+				AA11BEEF0000000000D20002 /* LustreLive.swift */,
+				AA11BEEF0000000000D20010 /* livestar.png */,
+				AA11BEEF0000000000D20003 /* Info.plist */,
+			);
+			path = LustreLive;
+			sourceTree = "<group>";
+		};
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
@@ -140,10 +228,13 @@
 				504EC3001FED79650016851F /* Sources */,
 				504EC3011FED79650016851F /* Frameworks */,
 				504EC3021FED79650016851F /* Resources */,
+				AA11BEEF0000000000D30005 /* Embed Foundation Extensions */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				AA11BEEF0000000000D1000F /* PBXTargetDependency */,
+				AA11BEEF0000000000D2000F /* PBXTargetDependency */,
 			);
 			name = App;
 			packageProductDependencies = (
@@ -152,6 +243,40 @@
 			productName = App;
 			productReference = 504EC3041FED79650016851F /* App.app */;
 			productType = "com.apple.product-type.application";
+		};
+		AA11BEEF0000000000D10007 /* LustreShare */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = AA11BEEF0000000000D1000B /* Build configuration list for PBXNativeTarget "LustreShare" */;
+			buildPhases = (
+				AA11BEEF0000000000D10008 /* Sources */,
+				AA11BEEF0000000000D10009 /* Frameworks */,
+				AA11BEEF0000000000D1000A /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = LustreShare;
+			productName = LustreShare;
+			productReference = AA11BEEF0000000000D10001 /* LustreShare.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
+		AA11BEEF0000000000D20007 /* LustreLive */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = AA11BEEF0000000000D2000B /* Build configuration list for PBXNativeTarget "LustreLive" */;
+			buildPhases = (
+				AA11BEEF0000000000D20008 /* Sources */,
+				AA11BEEF0000000000D20009 /* Frameworks */,
+				AA11BEEF0000000000D2000A /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = LustreLive;
+			productName = LustreLive;
+			productReference = AA11BEEF0000000000D20001 /* LustreLive.appex */;
+			productType = "com.apple.product-type.app-extension";
 		};
 /* End PBXNativeTarget section */
 
@@ -186,6 +311,8 @@
 			projectRoot = "";
 			targets = (
 				504EC3031FED79650016851F /* App */,
+				AA11BEEF0000000000D10007 /* LustreShare */,
+				AA11BEEF0000000000D20007 /* LustreLive */,
 			);
 		};
 /* End PBXProject section */
@@ -203,6 +330,21 @@
 				50379B232058CBB4000EE86E /* capacitor.config.json in Resources */,
 				504EC30D1FED79650016851F /* Main.storyboard in Resources */,
 				2FAD9763203C412B000D30F8 /* config.xml in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		AA11BEEF0000000000D1000A /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		AA11BEEF0000000000D2000A /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				AA11BEEF0000000000D20011 /* livestar.png in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -230,10 +372,42 @@
 				AA11BEEF00000000000ABF0B /* PickerPlugin.swift in Sources */,
 				AA11BEEF000000000000BF02 /* MyViewController.swift in Sources */,
 				9582B6832FE993A70072D4E8 /* SceneDelegate.swift in Sources */,
+				AA11BEEF0000000000D30002 /* LXLiveAttributes.swift in Sources */,
+				AA11BEEF0000000000D30004 /* LiveActivity.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		AA11BEEF0000000000D10008 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				AA11BEEF0000000000D10004 /* ShareViewController.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		AA11BEEF0000000000D20008 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				AA11BEEF0000000000D20004 /* LustreLive.swift in Sources */,
+				AA11BEEF0000000000D20012 /* LXLiveAttributes.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		AA11BEEF0000000000D1000F /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = AA11BEEF0000000000D10007 /* LustreShare */;
+			targetProxy = AA11BEEF0000000000D1000E /* PBXContainerItemProxy */;
+		};
+		AA11BEEF0000000000D2000F /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = AA11BEEF0000000000D20007 /* LustreLive */;
+			targetProxy = AA11BEEF0000000000D2000E /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin PBXVariantGroup section */
 		504EC30B1FED79650016851F /* Main.storyboard */ = {
@@ -392,7 +566,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
-				CODE_SIGN_STYLE = Automatic;
+				CODE_SIGN_STYLE = Manual;
 				CURRENT_PROJECT_VERSION = 1;
 				CODE_SIGN_ENTITLEMENTS = App/App.entitlements;
 				INFOPLIST_FILE = App/Info.plist;
@@ -404,6 +578,99 @@
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = __LX_BUNDLE__;
 				PRODUCT_NAME = "$(TARGET_NAME)";
+				PROVISIONING_PROFILE_SPECIFIER = "Lustre AppStore";
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		AA11BEEF0000000000D1000C /* Debug */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = 958DCC722DB07C7200EA8C5F /* debug.xcconfig */;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				INFOPLIST_FILE = LustreShare/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = __LX_BUNDLE__.share;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		AA11BEEF0000000000D1000D /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Manual;
+				CURRENT_PROJECT_VERSION = 1;
+				INFOPLIST_FILE = LustreShare/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = __LX_BUNDLE__.share;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				PROVISIONING_PROFILE_SPECIFIER = "Lustre Share AppStore";
+				SKIP_INSTALL = YES;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		AA11BEEF0000000000D2000C /* Debug */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = 958DCC722DB07C7200EA8C5F /* debug.xcconfig */;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				INFOPLIST_FILE = LustreLive/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.2;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = __LX_BUNDLE__.live;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		AA11BEEF0000000000D2000D /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Manual;
+				CURRENT_PROJECT_VERSION = 1;
+				INFOPLIST_FILE = LustreLive/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.2;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = __LX_BUNDLE__.live;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				PROVISIONING_PROFILE_SPECIFIER = "Lustre Live AppStore";
+				SKIP_INSTALL = YES;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "";
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
@@ -427,6 +694,24 @@
 			buildConfigurations = (
 				504EC3171FED79650016851F /* Debug */,
 				504EC3181FED79650016851F /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		AA11BEEF0000000000D1000B /* Build configuration list for PBXNativeTarget "LustreShare" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				AA11BEEF0000000000D1000C /* Debug */,
+				AA11BEEF0000000000D1000D /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		AA11BEEF0000000000D2000B /* Build configuration list for PBXNativeTarget "LustreLive" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				AA11BEEF0000000000D2000C /* Debug */,
+				AA11BEEF0000000000D2000D /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
