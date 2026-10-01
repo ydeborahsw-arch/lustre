@@ -2286,7 +2286,9 @@ public class NativeInputPlugin: CAPPlugin, CAPBridgedPlugin, UITextViewDelegate 
     static let modelNames: [(val: String, name: String)] = [
         ("claude-fable-5-1", "Fable 5.1"), ("claude-opus-5-5", "Opus 5.5"),
         ("claude-opus-5", "Opus 5"), ("claude-opus-4-6[1m]", "Opus 4.6"),
-        ("claude-opus-4-5", "Opus 4.5"), ("claude-sonnet-4-6", "Sonnet 4.6"),
+        // 1001 她:Sonnet 5.5 先放进来,终端升级后直接能用(升级前终端不认识它,按 20 万窗口算)
+        ("claude-opus-4-5", "Opus 4.5"), ("claude-sonnet-5-5", "Sonnet 5.5"),
+        ("claude-sonnet-4-6", "Sonnet 4.6"),
     ]
 
     static func prettyModel(_ raw: String) -> String {
