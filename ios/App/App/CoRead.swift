@@ -1189,18 +1189,15 @@ final class LXCoReadVC: UIViewController, UIGestureRecognizerDelegate, UIDocumen
         card.layer.borderWidth = 0.5
         card.layer.borderColor = t.border.cgColor
         let inner = card.bounds.width - 1 - 28
-        let chevW = LXCRCards.chevronSize
         let tf = LXCRFont.f(16)
         let title = LXCRText()
         title.set(crAttr(b.title, tf, t.ink1), font: tf, lineHeight: 16 * 1.45)
-        let tw = inner - 8 - chevW
+        // .book-card-chevron 里的 svg 没写尺寸,网页实际渲染宽 0(量过)——箭头看不见,只占一行 9px 字的高
+        let tw = inner - 8
         let th = title.height(for: tw)
         title.frame = CGRect(x: 14.5, y: 13.5, width: tw, height: th)
         card.addSubview(title)
-        let chev = UIImageView(image: crIcon(["M6 3l5 5-5 5"], size: chevW, stroke: 1.2, color: t.ink4))
-        chev.frame = CGRect(x: 14.5 + inner - chevW, y: 13.5 + 6, width: chevW, height: chevW)
-        card.addSubview(chev)
-        var y = 13.5 + max(th, 6 + chevW) + 6
+        var y = 13.5 + max(th, 6 + 9 * 1.6) + 6
         // 网页书单里没有 total_pages 这个字段(接口叫 page_count),所以那一行只剩"N 条批注"、进度条不出——照原样
         if b.annotCount > 0 {
             let mf = LXCRFont.f(11.5, 300)
@@ -1782,8 +1779,10 @@ final class LXCRBottomBar: UIView {
         let maxW = label.storage.length > 0 ? LXCRLine.width(label.storage) : 0
         // 两项基础宽 = 字宽 + inner,超出 = 字宽;各自按基础宽占比让出去
         var lw = maxW - maxW * maxW / max(1, maxW + inner)
-        let minW = LXCRLine.width(crAttr("888", Self.labelFont, t.ink4, kern: 0.5))
-        lw = max(minW, lw)
+        // flex 项最窄只能缩到 min-content:最宽的那个词
+        let words = label.storage.string.split(separator: " ").map(String.init)
+        let minW = words.map { LXCRLine.width(crAttr($0, Self.labelFont, t.ink4, kern: 0.5)) }.max() ?? 0
+        lw = min(maxW, max(minW, lw))
         let sw = inner - lw
         let lh = label.height(for: lw)
         labelSize = CGSize(width: lw, height: lh)
@@ -2750,9 +2749,6 @@ extension LXCoReadVC {
 // MARK: - 长按工具条 / 弹幕卡 / 划重点工具条
 
 final class LXCRCards: NSObject, UITextViewDelegate {
-    /// 书架卡片右边那个箭头的边长(网页的 svg 没写尺寸,量出来是这个)
-    static var chevronSize: CGFloat = 9
-
     enum Mode { case menu, write, list }
     unowned let vc: LXCoReadVC
     private(set) var dmPid: Int?
