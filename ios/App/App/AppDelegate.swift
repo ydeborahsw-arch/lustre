@@ -71,7 +71,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
                 DispatchQueue.main.async { application.registerForRemoteNotifications() }
             }
             LXCallCenter.shared.start()
-            LXLive.start()   // 1001 灵动岛"正在想":把令牌交给 relay
+            LXLive.start()   // 1001 灵动岛"正在想"已撤:只收掉之前留下的
         }
         return true
     }
