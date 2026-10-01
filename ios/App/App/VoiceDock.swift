@@ -23,6 +23,7 @@ final class LXVoiceDock: UIView {
     private var timeObs: Any?
     private weak var observedPlayer: AVPlayer?
     private var scrubbing = false
+    private var glassDark: Bool?
 
     private init() {
         super.init(frame: .zero)
@@ -126,6 +127,26 @@ final class LXVoiceDock: UIView {
         dash.path = UIBezierPath(roundedRect: rateB.bounds.insetBy(dx: 0.6, dy: 0.6), cornerRadius: 6).cgPath
     }
 
+    /// 0930 她:"白天的时候语音显示怎么也是深色玻璃,不应该也跟着主题走吗"——深浅跟紧挨着的输入框一样
+    /// (NativeInputPlugin.dockGlassDark)。深玻璃照 0907 原样;浅玻璃换浅材质+白膜,墨用输入框浅玻璃那支,各处透明度照深的抄
+    func applyGlass() {
+        let dark = NativeInputPlugin.live?.dockGlassDark ?? true
+        if glassDark == dark { return }
+        glassDark = dark
+        let ink: UIColor = dark ? .white : NativeInputPlugin.lightGlassInk
+        blur.effect = UIBlurEffect(style: dark ? .systemUltraThinMaterialDark : .systemUltraThinMaterialLight)
+        film.backgroundColor = UIColor(white: dark ? 0 : 1, alpha: 0.28)
+        layer.borderColor = UIColor(white: 1, alpha: dark ? 0.14 : 0.5).cgColor
+        playB.tintColor = ink
+        closeB.tintColor = ink
+        titleL.textColor = ink
+        subL.textColor = ink.withAlphaComponent(0.62)
+        rateB.setTitleColor(ink.withAlphaComponent(0.9), for: .normal)
+        dash.strokeColor = ink.withAlphaComponent(0.7).cgColor
+        track.backgroundColor = ink.withAlphaComponent(0.22)
+        fill.backgroundColor = ink.withAlphaComponent(0.92)
+    }
+
 
     static func sync() {
         DispatchQueue.main.async {
@@ -140,6 +161,7 @@ final class LXVoiceDock: UIView {
                        d.leadingAnchor.constraint(equalTo: host.leadingAnchor, constant: 12),
                        d.trailingAnchor.constraint(equalTo: host.trailingAnchor, constant: -12),
                    ]) }
+            d.applyGlass()
             if let card = NativeInputPlugin.live?.card { d.transform = card.transform }
             host.bringSubviewToFront(d)
             LXStage.settle(host)

@@ -1913,6 +1913,13 @@ public class NativeInputPlugin: CAPPlugin, CAPBridgedPlugin, UITextViewDelegate 
     /// 0926 她选 A:头像样式三块玻璃的深浅按壁纸定,不按主题。液态玻璃小块会自己跟着背后翻深浅,大块不翻、只认这里的设定
     /// (WWDC25)——按主题定的话,深色主题配浅壁纸,输入框长到第三行就从浅灰跳成深灰。没设自定义壁纸照主题
     var avGlassDark: Bool { ChatListPlugin.wallLight.map { !$0 } ?? cardDark }
+    /// 0930 她:白天小播放条怎么还是深色玻璃——它跟紧挨着的输入框同深浅:头像样式按上面那条,普通样式照主题
+    var dockGlassDark: Bool { avatarOn ? avGlassDark : cardDark }
+    /// 浅玻璃上的墨:顶栏按钮图案那支深色(白天 hdrBtnFg),输入框和小播放条共用
+    static var lightGlassInk: UIColor {
+        (LXMoonPalette.chat["day"]?["hdrBtnFg"] as? String).flatMap { color($0) }
+            ?? UIColor(red: 0x1D/255, green: 0x1D/255, blue: 0x1F/255, alpha: 1)
+    }
     /// 玻璃跟主题不同深浅时(深色主题配浅壁纸、或反过来),框里打的字和占位符换成那块玻璃配的墨:
     /// 浅玻璃=浅壁纸上聊天字那支近黑 + 白天的占位符色;深玻璃=月夜那套。加号、语音的线只看玻璃深浅
     /// (浅玻璃深色、深玻璃白色,见下);录音的 × 不动
@@ -1925,9 +1932,7 @@ public class NativeInputPlugin: CAPPlugin, CAPBridgedPlugin, UITextViewDelegate 
         let swap = avatarOn && gd != cardDark
         // 0927 她:加号、语音、录音计时跟顶上三颗统一,只看玻璃深浅——浅玻璃用顶栏按钮图案那支深色(白天 hdrBtnFg),
         // 深玻璃一律白色(她点名要白,不跟顶上的浅蓝/米白)
-        let fg = gd ? UIColor.white
-            : (LXMoonPalette.chat["day"]?["hdrBtnFg"] as? String).flatMap { NativeInputPlugin.color($0) }
-              ?? UIColor(red: 0x1D/255, green: 0x1D/255, blue: 0x1F/255, alpha: 1)
+        let fg = gd ? UIColor.white : Self.lightGlassInk
         avFgC = fg
         avPlusBtn?.tintColor = fg; avRecL?.textColor = fg
         if !(avatarOn && recorder != nil) { avVoiceBtn?.tintColor = fg }
@@ -1937,6 +1942,7 @@ public class NativeInputPlugin: CAPPlugin, CAPBridgedPlugin, UITextViewDelegate 
                                                    : UIColor(red: 0x9A/255, green: 0x9A/255, blue: 0xA0/255, alpha: 1)
         if let c = text { tv?.textColor = c }
         if let c = ph { phLabel?.textColor = c }
+        LXVoiceDock.shared?.applyGlass()
     }
 
     func micDeniedToast() {
