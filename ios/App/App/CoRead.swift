@@ -2938,6 +2938,7 @@ final class LXCRCards: NSObject, UITextViewDelegate {
         if !notes.isEmpty {
             let list = UIScrollView()
             list.showsVerticalScrollIndicator = true
+            list.contentInsetAdjustmentBehavior = .never
             var ly: CGFloat = 0
             let wf = LXCRFont.f(10.5), xf = LXCRFont.f(13.5)
             for (i, n) in notes.enumerated() {
@@ -3403,6 +3404,9 @@ final class LXCRPanels: NSObject, UITextFieldDelegate {
         searchField.spellCheckingType = .no
         searchField.autocapitalizationType = .none
         searchField.returnKeyType = .search
+        // 这几块贴着屏幕底(或顶)的面板,底部安全区已经按 CSS 自己算进内容里了;
+        // 系统再自动加一层内边距,目录打开时会往下错开一截,第一行顶上被吃掉(预览里量到 8 点)
+        for s in [tocList, annotPanel, searchResults] { s.contentInsetAdjustmentBehavior = .never }
     }
 
     func applyTheme() {
