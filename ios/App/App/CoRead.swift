@@ -351,6 +351,7 @@ struct LXCRBook {
     var title: String
     var paraCount: Int
     var annotCount: Int
+    var pageCount: Int
     var progressPage: Int
     var updatedAt: String
     var createdAt: String
@@ -362,6 +363,8 @@ struct LXCRBook {
         title = (d["title"] as? String) ?? ""
         paraCount = (d["paragraph_count"] as? NSNumber)?.intValue ?? 0
         annotCount = (d["annotation_count"] as? NSNumber)?.intValue ?? 0
+        // 书单接口给的是 page_count(网页读的 total_pages 不存在,所以网页书架一直没有页数和进度条;她 1002 说修)
+        pageCount = (d["page_count"] as? NSNumber)?.intValue ?? (d["total_pages"] as? NSNumber)?.intValue ?? 0
         let p = d["progress"] as? [String: Any]
         progressPage = (p?["page"] as? NSNumber)?.intValue ?? 0
         updatedAt = (p?["updated_at"] as? String) ?? ""
@@ -560,10 +563,11 @@ enum LXCRFake {
         annots["sample01"] = a
         tocs["sample01"] = toc
         progress["sample01"] = 1
+        vocab["sample01"] = [["id": "v1", "word": "Latin", "paragraph_id": 2, "note": "样板生词"] as [String: Any]]   // 开书时取回来的生词:英文那段 Latin 下面有点线
         books = [
-            ["id": "sample01", "title": "样书:雨夜读书", "paragraph_count": n - 1, "annotation_count": a.count,
+            ["id": "sample01", "title": "样书:雨夜读书", "paragraph_count": n - 1, "page_count": pages("sample01").count, "annotation_count": a.count,
              "has_bookmark": false, "progress": ["page": 1, "updated_at": now] as [String: Any], "created_at": now],
-            ["id": "sample02", "title": "样书二:书名写得长一点,看看到了右边怎么折行", "paragraph_count": 0, "annotation_count": 0,
+            ["id": "sample02", "title": "样书二:书名写得长一点,看看到了右边怎么折行", "paragraph_count": 0, "page_count": 0, "annotation_count": 0,
              "has_bookmark": false, "progress": NSNull(), "created_at": now],
         ]
     }
@@ -913,7 +917,17 @@ final class LXCoReadVC: UIViewController, UIGestureRecognizerDelegate, UIDocumen
         recordsWrap.addSubview(recTop)
         recTop.back.addAction(UIAction { [weak self] _ in self?.backToReader() }, for: .touchUpInside)
 
-        // .night-toggle:右下 36px 圆钮(网页里按了只换一下符号、随即被配色盖回去,等于没用——照抄)
+        // .night-toggle:右下 36px 圆钮。网页里按了只换一下符号、随即被配色盖回去,等于没用;她 1002 说修:
+        // 按一下换到夜黑,再按回到之前那套配色(没记过就回雾蓝)
+        nightToggle.addAction(UIAction { [weak self] _ in
+            guard let s = self else { return }
+            if s.t.id == "night" {
+                s.setTheme(UserDefaults.standard.string(forKey: "lx.cr.dayTheme") ?? "mist")
+            } else {
+                UserDefaults.standard.set(s.t.id, forKey: "lx.cr.dayTheme")
+                s.setTheme("night")
+            }
+        }, for: .touchUpInside)
         nightToggle.layer.cornerRadius = 18
         nightToggle.layer.borderWidth = 0.5
         crShadow(nightToggle.layer, y: 2, blur: 8, a: 0.08)
@@ -1213,14 +1227,30 @@ final class LXCoReadVC: UIViewController, UIGestureRecognizerDelegate, UIDocumen
         title.frame = CGRect(x: 14.5, y: 13.5, width: tw, height: th)
         card.addSubview(title)
         var y = 13.5 + max(th, 6 + 9 * 1.6) + 6
-        // 网页书单里没有 total_pages 这个字段(接口叫 page_count),所以那一行只剩"N 条批注"、进度条不出——照原样
-        if b.annotCount > 0 {
+        // .book-card-meta:"第 P / N 页 · K 条批注";有页数时下面一条 4px 进度条(网页本意,书单字段名对上了才出得来)
+        let curP = max(1, b.progressPage)
+        let parts = [b.pageCount > 0 ? "第 \(curP) / \(b.pageCount) 页" : "", b.annotCount > 0 ? "\(b.annotCount) 条批注" : ""].filter { !$0.isEmpty }
+        if !parts.isEmpty {
             let mf = LXCRFont.f(11.5, 300)
             let meta = LXCRLine(frame: CGRect(x: 14.5, y: y, width: inner, height: 11.5 * 1.6))
-            meta.text = crAttr("\(b.annotCount) 条批注", mf, t.ink3, kern: 0.575)
+            meta.text = crAttr(parts.joined(separator: " · "), mf, t.ink3, kern: 0.575)
             meta.baseline = crBaseline(mf, 11.5 * 1.6)
             card.addSubview(meta)
             y += 11.5 * 1.6 + 10
+        }
+        if b.pageCount > 0 {
+            let pct = min(1, CGFloat(curP) / CGFloat(b.pageCount))
+            let bar = UIView(frame: CGRect(x: 14.5, y: y, width: inner, height: 4))
+            bar.backgroundColor = t.surface3
+            bar.layer.cornerRadius = 2
+            bar.clipsToBounds = true
+            bar.isUserInteractionEnabled = false
+            let fill = UIView(frame: CGRect(x: 0, y: 0, width: (inner * pct).rounded(), height: 4))
+            fill.backgroundColor = t.accent
+            fill.layer.cornerRadius = 2
+            bar.addSubview(fill)
+            card.addSubview(bar)
+            y += 4
         }
         card.frame.size.height = y + 13.5
         card.addAction(UIAction { [weak self, weak card] _ in
@@ -1462,8 +1492,9 @@ final class LXCoReadVC: UIViewController, UIGestureRecognizerDelegate, UIDocumen
             pc.addSubview(bar)
             py += 5
         }
-        // 网页这里拿书单的 total_pages 算百分比,书单里没有这个字段,所以她那行一直是 0%——照原样
-        progressRow(meName, "p.\(page) · 0%", t.jade, 0)
+        // 她那行:读到第几页 / 总页数(网页本意;网页读错字段一直是 0%,她 1002 说修)
+        let myPct = b.pageCount > 0 ? Int((Double(page) / Double(b.pageCount) * 100).rounded()) : 0
+        progressRow(meName, "p.\(page) · \(myPct)%", t.jade, CGFloat(min(100, myPct)) / 100)
         let mine = detailAnnots.filter { $0.isClaude }
         if let maxPid = mine.map({ $0.pid }).max(), maxPid > 0 {
             let pct = b.paraCount > 0 ? min(100, Int((Double(maxPid) / Double(b.paraCount) * 100).rounded())) : 0
@@ -2153,19 +2184,28 @@ extension LXCoReadVC: UITableViewDataSource, UITableViewDelegate, UITextViewDele
     /// 正文先到就进门,批注/书签/目录并行补齐后就地补画(网页 openBook 同款)
     func fetchExtras(_ id: String) {
         var got = 0
-        var a: [LXCRAnnot] = [], bm: Int? = nil, tc: [LXCRToc] = []
+        var a: [LXCRAnnot] = [], bm: Int? = nil, tc: [LXCRToc] = [], vc: [(word: String, pid: Int)] = []
         let done = { [weak self] in
             got += 1
-            guard got == 3, let s = self, s.book?.id == id else { return }
+            guard got == 4, let s = self, s.book?.id == id else { return }
             s.annots = a
             s.noteMe(a)
             s.bookmark = bm
             s.toc = tc
+            // 网页开书从来不取生词本,存过的下划线重开就没了;她 1002 说修:开书时一起取。当场加的(取回来之前)也留着
+            s.vocab = vc + s.vocab.filter { w in !vc.contains { $0.word == w.word && $0.pid == w.pid } }
             s.refreshParas()
             if s.mode == .records { s.buildRecords() }
         }
         LXCRAPI.call("GET", "/books/\(id)/annotations") { obj, _ in
             a = ((obj as? [[String: Any]]) ?? []).compactMap(LXCRAnnot.init); done()
+        }
+        LXCRAPI.call("GET", "/books/\(id)/vocab") { obj, _ in
+            vc = ((obj as? [[String: Any]]) ?? []).compactMap { d in
+                guard let w = d["word"] as? String, !w.isEmpty, let pid = (d["paragraph_id"] as? NSNumber)?.intValue else { return nil }
+                return (w, pid)
+            }
+            done()
         }
         LXCRAPI.call("GET", "/books/\(id)/bookmarks") { obj, _ in
             bm = ((obj as? [String: Any])?["bookmark"] as? NSNumber)?.intValue; done()
@@ -3502,14 +3542,12 @@ final class LXCRPanels: NSObject, UITextFieldDelegate {
             b.layer.borderWidth = 1
             b.layer.borderColor = on ? t.ink3.cgColor : UIColor.clear.cgColor
             let gap: CGFloat = [1, 2.5, 4, 5.5][i]
-            // .rs-lh-ic 是 15 高的竖排 flex 盒:四条 1.5 的线放不下时按 flex-shrink 一起压扁,最窄压到 0
-            // (网页上第三个按钮是 0.75 的细线、第四个线被压没了,看着是空的——量过,照抄)
-            let th = min(1.5, max(0, (15 - 3 * gap) / 4))
+            // 四条 1.5 的线,间距 1 / 2.5 / 4 / 5.5(网页那个 15 高的盒子把第三、四个按钮的线压细/压没了,她 1002 说修:线都画全)
+            let th: CGFloat = 1.5
             let total = 4 * th + 3 * gap
             var ly = (34 - total) / 2
             for _ in 0..<4 {
                 let line = UIView(frame: CGRect(x: (segW - 16) / 2, y: ly, width: 16, height: th))
-                line.isHidden = th <= 0
                 line.backgroundColor = t.ink3
                 line.layer.cornerRadius = 0.75
                 line.isUserInteractionEnabled = false
