@@ -81,9 +81,11 @@ jobs:
             for t in $(seq 10 5 170); do sleep 5; shot c$t; done
           elif [ "$LX_PREVIEW_FOCUS" = "coread" ]; then
             # The reading room opens full screen over everything with a sample book and sample notes only (no account data).
-            # It steps through 15 screens, 8 s each, starting about 1 s after the chat finishes loading; a shot every 4 s.
+            # It steps through 15 screens, 16 s each, starting about 6 s after the chat finishes loading.
+            # A shot takes several seconds on this runner, so shoot for a fixed 270 s instead of counting shots.
             sleep 5
-            for t in $(seq 10 4 150); do sleep 4; shot r$t; done
+            end=$((SECONDS + 270)); i=0
+            while [ $SECONDS -lt $end ]; do shot r$i; i=$((i + 1)); sleep 2; done
           elif [ "$LX_PREVIEW_FOCUS" = "bubbles" ]; then
             # A full-screen page of sample bubbles covers everything; the chat list is hidden underneath.
             # The page changes about every 25 s (plain bubbles, avatar bubbles, then sidebar rows); from about 80 s the

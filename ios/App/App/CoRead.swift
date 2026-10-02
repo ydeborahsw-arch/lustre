@@ -102,6 +102,16 @@ enum LXCRFont {
     }
 }
 
+/// CSS 的 line-height: normal 在手机 Safari 里:行里有中文(落到 PingFang)就按两种字体里更高的上沿、更深的下沿撑开,
+/// 约 1.4 倍字号;纯拉丁只按 SF(约 1.2 倍)。对过模拟器截图:按 SF 算的中文行每行矮 2–3 点
+fileprivate func crNormal(_ f: UIFont, _ s: String = "中") -> (lh: CGFloat, asc: CGFloat) {
+    let half = f.leading / 2
+    let cjk = s.unicodeScalars.contains { (0x2E80...0x9FFF).contains($0.value) || (0xF900...0xFAFF).contains($0.value) || (0xFE30...0xFE4F).contains($0.value) || (0xFF00...0xFFEF).contains($0.value) }
+    guard cjk, let pf = UIFont(name: "PingFangSC-Regular", size: f.pointSize) else { return (f.lineHeight, f.ascender + half) }
+    let a = max(f.ascender + half, pf.ascender), d = max(-f.descender + half, -pf.descender)
+    return (a + d, a)
+}
+
 /// CSS 行盒:每行高 L,基线 = 半行距 + 主字体上沿(浏览器把多出来的行距上下平分)
 fileprivate func crBaseline(_ f: UIFont, _ lh: CGFloat) -> CGFloat { (lh - (f.ascender - f.descender)) / 2 + f.ascender }
 
@@ -684,6 +694,7 @@ final class LXCRTopBar: UIView {
     let right = LXCRPress()
     private let rightLabel = LXCRLine()
     private var backW: CGFloat = 0
+    private var backN: (lh: CGFloat, asc: CGFloat) = (0, 0)
     private var rightW: CGFloat = 0
 
     override init(frame: CGRect) {
@@ -699,7 +710,8 @@ final class LXCRTopBar: UIView {
         // .nav-back:10px 300 字距 .05em ink2;图标 10×10
         let bf = LXCRFont.f(10, 300)
         backLabel.text = crAttr(b, bf, t.ink2, kern: 0.5)
-        backLabel.baseline = bf.ascender
+        backN = crNormal(bf, b)
+        backLabel.baseline = backN.asc
         backIcon.image = crIcon(["M10 3L5 8l5 5"], size: 10, stroke: 1.2, color: t.ink2)
         backW = 10 + 4 + backLabel.textWidth
         // .reader-topbar-title:15px 500 ink1,行高 1.6
@@ -724,7 +736,7 @@ final class LXCRTopBar: UIView {
     override func layoutSubviews() {
         super.layoutSubviews()
         let h = bounds.height, w = bounds.width
-        let bh = LXCRFont.f(10, 300).lineHeight
+        let bh = backN.lh
         back.frame = CGRect(x: 20, y: (h - bh) / 2 - 8, width: backW, height: bh + 16)
         backIcon.frame = CGRect(x: 0, y: 8 + (bh - 10) / 2, width: 10, height: 10)
         backLabel.frame = CGRect(x: 14, y: 8, width: backW - 14 + 2, height: bh)
@@ -1243,7 +1255,8 @@ final class LXCoReadVC: UIViewController, UIGestureRecognizerDelegate, UIDocumen
             ("重命名", false, { [weak self] in self?.renameBook(id) }),
             ("删除", true, { [weak self] in self?.panels.confirm("删除这本书？", danger: "Delete") { self?.deleteBook(id) } }),
         ]
-        let rowH = 8 + f.lineHeight + 8
+        let n = crNormal(f)
+        let rowH = 8 + n.lh + 8
         let w = max(140, items.map { 28 + LXCRLine.width(crAttr($0.0, f, t.ink2)) }.max() ?? 140)
         let menu = UIView()
         menu.backgroundColor = t.surface
@@ -1256,9 +1269,9 @@ final class LXCoReadVC: UIViewController, UIGestureRecognizerDelegate, UIDocumen
             let b = LXCRPress(frame: CGRect(x: 0, y: y, width: w, height: rowH))
             b.normalBg = .clear
             b.pressedBg = t.accentSoft
-            let l = LXCRLine(frame: CGRect(x: 14, y: 8, width: w - 28, height: f.lineHeight))
+            let l = LXCRLine(frame: CGRect(x: 14, y: 8, width: w - 28, height: n.lh))
             l.text = crAttr(label, f, danger ? t.vermillion : t.ink2)
-            l.baseline = f.ascender
+            l.baseline = n.asc
             b.addSubview(l)
             b.addAction(UIAction { [weak self] _ in self?.hideCtxMenu(); act() }, for: .touchUpInside)
             menu.addSubview(b)
@@ -1502,11 +1515,9 @@ final class LXCoReadVC: UIViewController, UIGestureRecognizerDelegate, UIDocumen
                 pl.text = crAttr("\u{00B6}\(pid)", gf, t.ink3, kern: 0.5)
                 pl.baseline = gf.ascender
                 tog.addSubview(pl)
-                let chev = UIImageView(image: crIcon(["M3 6l5 5 5-5"], size: 8, stroke: 1.2, color: t.ink3))
-                chev.frame = CGRect(x: cw - 16 - 8, y: (rowH - 8) / 2, width: 8, height: 8)
-                if open { chev.transform = CGAffineTransform(rotationAngle: .pi) }
-                tog.addSubview(chev)
-                let nl = LXCRLine(frame: CGRect(x: cw - 16 - 8 - 8 - 60, y: 10, width: 60, height: gf.lineHeight))
+                // .annot-group-chevron 里的 svg 也没写尺寸,网页上宽 0 看不见(和书架卡片箭头一样)——照抄:不画,
+                // 只留 flex 的 8px 间距,数字右边离边 16 + 8
+                let nl = LXCRLine(frame: CGRect(x: cw - 16 - 8 - 60, y: 10, width: 60, height: gf.lineHeight))
                 nl.text = crAttr("\(items.count)", nf, t.ink3)
                 nl.baseline = pl.baseline
                 nl.align = .right
@@ -1530,11 +1541,12 @@ final class LXCoReadVC: UIViewController, UIGestureRecognizerDelegate, UIDocumen
         y += ac.bounds.height + 14
         // .delete-book-btn:9px 300 字距 1.5 大写,朱红半透明
         let df = LXCRFont.f(9, 300)
-        let del = LXCRPress(frame: CGRect(x: x0, y: y + 20, width: cw, height: 16 + 9 * 1.6 + 16))
+        let dn = crNormal(df, "DELETE BOOK")     // <button>:不继承 body 的 1.6,行高是 normal
+        let del = LXCRPress(frame: CGRect(x: x0, y: y + 20, width: cw, height: 16 + dn.lh + 16))
         del.alpha = 0.5
-        let dl = LXCRLine(frame: CGRect(x: 0, y: 16, width: cw, height: 9 * 1.6))
+        let dl = LXCRLine(frame: CGRect(x: 0, y: 16, width: cw, height: dn.lh))
         dl.text = crAttr("DELETE BOOK", df, t.vermillion, kern: 1.5)
-        dl.baseline = crBaseline(df, 9 * 1.6)
+        dl.baseline = dn.asc
         dl.align = .center
         del.addSubview(dl)
         del.addAction(UIAction { [weak self] _ in
@@ -1678,6 +1690,7 @@ final class LXCRBottomBar: UIView {
 
     private static let labelFont = LXCRFont.f(9, 300)
     private static let btnFont = LXCRFont.f(8, 300)
+    private static let btnN = crNormal(btnFont)
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -1728,7 +1741,7 @@ final class LXCRBottomBar: UIView {
             } : nil).withRenderingMode(.alwaysTemplate)
             ic.tintColor = t.ink3
             l.text = crAttr(s.0, Self.btnFont, t.ink3, kern: 0.5)
-            l.baseline = Self.btnFont.ascender
+            l.baseline = Self.btnN.asc
         }
         setPage(cur, total)
     }
@@ -1770,7 +1783,7 @@ final class LXCRBottomBar: UIView {
 
     /// 页码行高(含上 4 的内边距)
     private var pageRowH: CGFloat { 4 + max(labelSize.height + 2, 6 + 3 + 2) }
-    private var iconRowH: CGFloat { 6 + 6 + 18 + 2 + Self.btnFont.lineHeight + 6 + 10 }
+    private var iconRowH: CGFloat { 6 + 6 + 18 + 2 + Self.btnN.lh + 6 + 10 }
     var barHeight: CGFloat { 0.5 + pageRowH + iconRowH + safeBottom }
 
     override func layoutSubviews() {
@@ -1800,11 +1813,11 @@ final class LXCRBottomBar: UIView {
         let widths = buttons.map { 12 + max(18, $0.2.textWidth) + 12 }
         let gap = (avail - widths.reduce(0, +)) / CGFloat(buttons.count)
         var x = rowX + 20 + gap / 2
-        let bh = 6 + 18 + 2 + Self.btnFont.lineHeight + 6
+        let bh = 6 + 18 + 2 + Self.btnN.lh + 6
         for (i, (b, ic, l)) in buttons.enumerated() {
             b.frame = CGRect(x: x, y: iconTop + 6, width: widths[i], height: bh)
             ic.frame = CGRect(x: (widths[i] - 18) / 2, y: 6, width: 18, height: 18)
-            l.frame = CGRect(x: 0, y: 6 + 18 + 2, width: widths[i], height: Self.btnFont.lineHeight)
+            l.frame = CGRect(x: 0, y: 6 + 18 + 2, width: widths[i], height: Self.btnN.lh)
             l.align = .center
             x += widths[i] + gap
         }
@@ -2562,7 +2575,7 @@ extension LXCoReadVC {
         recGroups = groups.values.sorted { $0.pid < $1.pid }.map { g in
             (g.title, g.pid, g.items.sorted { x, y in x.created != y.created ? x.created < y.created : x.id < y.id })
         }
-        let hv = UIView(frame: CGRect(x: 0, y: 0, width: recTable.bounds.width, height: 12 + 12 + LXCRFont.f(9, 300).lineHeight + 8 + 12))
+        let hv = UIView(frame: CGRect(x: 0, y: 0, width: recTable.bounds.width, height: 12 + 12 + crNormal(LXCRFont.f(9, 300)).lh + 8 + 12))
         buildFilter(hv)
         recTable.tableHeaderView = hv
         let empty = recGroups.isEmpty
@@ -2588,13 +2601,14 @@ extension LXCoReadVC {
         for (label, val) in chips {
             let a = crAttr(label.uppercased(), f, annotFilter == val ? t.bg : t.ink3, kern: 1)
             let w = LXCRLine.width(a) + 16
-            let b = LXCRPress(frame: CGRect(x: x, y: 12 + 12, width: w, height: 4 + f.lineHeight + 4))
+            let n = crNormal(f, label)
+            let b = LXCRPress(frame: CGRect(x: x, y: 12 + 12, width: w, height: 4 + n.lh + 4))
             b.normalBg = annotFilter == val ? t.ink1 : .clear
             b.pressedBg = annotFilter == val ? t.ink1 : t.accentSoft
             b.layer.cornerRadius = 2
-            let l = LXCRLine(frame: CGRect(x: 8, y: 4, width: w - 16 + 2, height: f.lineHeight))
+            let l = LXCRLine(frame: CGRect(x: 8, y: 4, width: w - 16 + 2, height: n.lh))
             l.text = a
-            l.baseline = f.ascender
+            l.baseline = n.asc
             b.addSubview(l)
             b.addAction(UIAction { [weak self] _ in
                 guard let s = self else { return }
@@ -2866,7 +2880,8 @@ final class LXCRCards: NSObject, UITextViewDelegate {
             ("\u{29C9}", "复制", { [weak self] in self?.copyPara() }),
             ("\u{1F449}", "戳一戳", { [weak self] in self?.poke() }),
         ]
-        let itemH = 4 + 24 + 5 + tf.lineHeight + 4
+        let tn = crNormal(tf)
+        let itemH = 4 + 24 + 5 + tn.lh + 4
         var x: CGFloat = 6
         for (i, it) in items.enumerated() {
             let label = crAttr(it.1, tf, fg)
@@ -2889,10 +2904,10 @@ final class LXCRCards: NSObject, UITextViewDelegate {
             gl.baseline = (22 - 13) / 2 + crBaseline(icf, 13) + 1
             ic.addSubview(gl)
             b.addSubview(ic)
-            let l = LXCRLine(frame: CGRect(x: 0, y: 4 + 24 + 5, width: w, height: tf.lineHeight))
+            let l = LXCRLine(frame: CGRect(x: 0, y: 4 + 24 + 5, width: w, height: tn.lh))
             l.text = label
             l.align = .center
-            l.baseline = tf.ascender
+            l.baseline = tn.asc
             b.addSubview(l)
             b.addAction(UIAction { _ in it.2() }, for: .touchUpInside)
             card.addSubview(b)
@@ -2999,14 +3014,15 @@ final class LXCRCards: NSObject, UITextViewDelegate {
         let sl = LXCRLine(frame: send.bounds)
         sl.text = sendLabel
         sl.align = .center
-        sl.baseline = (34 - sf.lineHeight) / 2 + sf.ascender
+        let sn = crNormal(sf)
+        sl.baseline = (34 - sn.lh) / 2 + sn.asc
         send.addSubview(sl)
         send.addAction(UIAction { [weak self] _ in self?.submit() }, for: .touchUpInside)
         card.addSubview(send)
         y += inH + 7
         // .dm-foot:11px ink3,收起靠右
         let ff = LXCRFont.f(11)
-        let fh = 3 + ff.lineHeight + 3
+        let fh = 3 + crNormal(ff).lh + 3
         var fx: CGFloat = 13
         let tools: [(String, () -> Void)] = [
             ("划重点", { [weak self] in self?.markMode() }),
@@ -3028,9 +3044,10 @@ final class LXCRCards: NSObject, UITextViewDelegate {
         let a = crAttr(s, f, t.ink3)
         let w = LXCRLine.width(a)
         let b = LXCRPress(frame: CGRect(x: x, y: y, width: w, height: h))
-        let l = LXCRLine(frame: CGRect(x: 0, y: 3, width: w + 2, height: f.lineHeight))
+        let n = crNormal(f, s)
+        let l = LXCRLine(frame: CGRect(x: 0, y: 3, width: w + 2, height: n.lh))
         l.text = a
-        l.baseline = f.ascender
+        l.baseline = n.asc
         b.addSubview(l)
         b.addTarget(self, action: #selector(footDown(_:)), for: [.touchDown, .touchDragEnter])
         b.addTarget(self, action: #selector(footUp(_:)), for: [.touchUpInside, .touchUpOutside, .touchCancel, .touchDragExit])
@@ -3481,15 +3498,19 @@ final class LXCRPanels: NSObject, UITextFieldDelegate {
             b.layer.borderWidth = 1
             b.layer.borderColor = on ? t.ink3.cgColor : UIColor.clear.cgColor
             let gap: CGFloat = [1, 2.5, 4, 5.5][i]
-            let total = 4 * 1.5 + 3 * gap
+            // .rs-lh-ic 是 15 高的竖排 flex 盒:四条 1.5 的线放不下时按 flex-shrink 一起压扁,最窄压到 0
+            // (网页上第三个按钮是 0.75 的细线、第四个线被压没了,看着是空的——量过,照抄)
+            let th = min(1.5, max(0, (15 - 3 * gap) / 4))
+            let total = 4 * th + 3 * gap
             var ly = (34 - total) / 2
             for _ in 0..<4 {
-                let line = UIView(frame: CGRect(x: (segW - 16) / 2, y: ly, width: 16, height: 1.5))
+                let line = UIView(frame: CGRect(x: (segW - 16) / 2, y: ly, width: 16, height: th))
+                line.isHidden = th <= 0
                 line.backgroundColor = t.ink3
                 line.layer.cornerRadius = 0.75
                 line.isUserInteractionEnabled = false
                 b.addSubview(line)
-                ly += 1.5 + gap
+                ly += th + gap
             }
             b.addAction(UIAction { [weak self] _ in
                 guard let s = self else { return }
@@ -3640,7 +3661,7 @@ final class LXCRPanels: NSObject, UITextFieldDelegate {
                 let col = active ? t.accent : (lvl == 0 ? t.ink2 : t.ink3)
                 let px: CGFloat = lvl == 0 ? 20 : (lvl == 1 ? 36 : 52)
                 let tx = LXCRText()
-                tx.set(crAttr(crCollapse(item.title), f, col), font: f, lineHeight: f.lineHeight)
+                tx.set(crAttr(crCollapse(item.title), f, col), font: f, lineHeight: crNormal(f, item.title).lh)
                 let th = tx.height(for: W - px - 20)
                 let row = LXCRPress(frame: CGRect(x: 0, y: y, width: W, height: 10 + th + 10 + 1))
                 row.normalBg = active ? t.accentSoft : .clear
@@ -3726,16 +3747,20 @@ final class LXCRPanels: NSObject, UITextFieldDelegate {
         annotPanel.addSubview(close)
         y += 22 + 8
         if let hl = annotHl {
-            let qf = LXCRFont.italic(15)
-            let a = NSMutableAttributedString(attributedString: crAttr("\u{201C}", LXCRFont.f(20), t.ink4))
-            a.append(NSAttributedString(string: "\u{2009}"))
+            let qf = LXCRFont.italic(15), mf = LXCRFont.f(20)
+            // ::before 是 20px 的 “,line-height 1.6 按它自己的字号算=32 高,和 15px 正文(24 高)按基线对齐 →
+            // 第一行被撑高:基线往下挪 extraTop,行底多出 extraBottom(折到第二行的长引文,后面各行仍按 24)
+            let half = { (f: UIFont, l: CGFloat) in (l - (f.ascender - f.descender)) / 2 }
+            let extraTop = max(0, (mf.ascender + half(mf, 32)) - (qf.ascender + half(qf, 24)))
+            let extraBottom = max(0, (-mf.descender + half(mf, 32)) - (-qf.descender + half(qf, 24)))
+            let a = NSMutableAttributedString(attributedString: crAttr("\u{201C}", mf, t.ink4, kern: 2))   // margin-right: 2px
             a.append(crAttr(hl, qf, t.ink2, oblique: true))
             let tx = LXCRText()
             tx.set(a, font: qf, lineHeight: 15 * 1.6)
             let h = tx.height(for: W - 40)
-            tx.frame = CGRect(x: 20, y: y, width: W - 40, height: h)
+            tx.frame = CGRect(x: 20, y: y + extraTop, width: W - 40, height: h)
             annotPanel.addSubview(tx)
-            y += h + 12
+            y += extraTop + h + extraBottom + 12
             let hair = UIView(frame: CGRect(x: 0, y: y, width: W, height: 0.5))
             hair.backgroundColor = t.borderSoft
             annotPanel.addSubview(hair)
@@ -4269,7 +4294,7 @@ enum LXCRPreview {
             (UIColor(red: 0.2, green: 0.4, blue: 0.4, alpha: 1), { vc.setThemeNow("white"); vc.backFromReader(); vc.openDetail("sample01") }),
         ]
         for (i, st) in steps.enumerated() {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1 + Double(i) * 8) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 6 + Double(i) * 16) {   // 截图在 CI 上一张要好几秒,每步留 16 秒
                 st.1()
                 phase.backgroundColor = st.0
                 if mark.superview !== vc.view { vc.view.addSubview(mark); vc.view.addSubview(phase) }
