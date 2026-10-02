@@ -56,7 +56,7 @@ jobs:
           cd ios/App
           xcodebuild -project App.xcodeproj -scheme App -configuration Debug \
             -sdk iphonesimulator -derivedDataPath $PWD/build/sim \
-            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO build > build.log 2>&1 || (tail -80 build.log; exit 1)
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO build > build.log 2>&1 || (grep -E "error:" build.log | sort -u | head -80; tail -20 build.log; exit 1)
           tail -3 build.log
       - name: Boot, launch, screenshot, send privately
         run: |
