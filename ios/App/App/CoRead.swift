@@ -247,11 +247,14 @@ final class LXCRLayout: NSLayoutManager, NSLayoutManagerDelegate {
     /// 一段字符在每一行上占的横向范围 + 那一行的基线 y
     private func eachLineBox(_ range: NSRange, _ tc: NSTextContainer, _ body: (CGRect, CGFloat) -> Void) {
         let gr = glyphRange(forCharacterRange: range, actualCharacterRange: nil)
-        enumerateLineFragments(forGlyphRange: gr) { rect, _, _, lineGR, _ in
-            let inter = NSIntersectionRange(gr, lineGR)
-            guard inter.length > 0 else { return }
-            let b = self.boundingRect(forGlyphRange: inter, in: tc)
-            body(b, rect.minY + self.baseline)
+        // 系统把这个回调标成会逃逸,其实是同步跑完的
+        withoutActuallyEscaping(body) { body in
+            enumerateLineFragments(forGlyphRange: gr) { rect, _, _, lineGR, _ in
+                let inter = NSIntersectionRange(gr, lineGR)
+                guard inter.length > 0 else { return }
+                let b = self.boundingRect(forGlyphRange: inter, in: tc)
+                body(b, rect.minY + self.baseline)
+            }
         }
     }
 }
