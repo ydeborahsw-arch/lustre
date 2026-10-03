@@ -700,6 +700,8 @@ final class LXCRTopBar: UIView {
     private var backW: CGFloat = 0
     private var backN: (lh: CGFloat, asc: CGFloat) = (0, 0)
     private var rightW: CGFloat = 0
+    /// 右上角回聊天的圆 × 占的地方(由主控放,顶栏只让位)
+    var rightInset: CGFloat = 0 { didSet { setNeedsLayout() } }
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -711,13 +713,13 @@ final class LXCRTopBar: UIView {
 
     func configure(_ t: LXCRTheme, back b: String, title tt: String, right r: String?) {
         backgroundColor = t.bg
-        // .nav-back:10px 300 字距 .05em ink2;图标 10×10
-        let bf = LXCRFont.f(10, 300)
-        backLabel.text = crAttr(b, bf, t.ink2, kern: 0.5)
+        // 1003 她要"界面内返回"和"回聊天"分开:返回只退一层,字从网页的 10px 放到 15,图标 14
+        let bf = LXCRFont.f(15)
+        backLabel.text = crAttr(b, bf, t.ink2)
         backN = crNormal(bf, b)
         backLabel.baseline = backN.asc
-        backIcon.image = crIcon(["M10 3L5 8l5 5"], size: 10, stroke: 1.2, color: t.ink2)
-        backW = 10 + 4 + backLabel.textWidth
+        backIcon.image = crIcon(["M10 3L5 8l5 5"], size: 14, stroke: 1.6, color: t.ink2)
+        backW = 14 + 3 + backLabel.textWidth
         // .reader-topbar-title:15px 500 ink1,行高 1.6
         let tf = LXCRFont.f(15, 500)
         title.text = crAttr(tt, tf, t.ink1)
@@ -741,13 +743,15 @@ final class LXCRTopBar: UIView {
         super.layoutSubviews()
         let h = bounds.height, w = bounds.width
         let bh = backN.lh
-        back.frame = CGRect(x: 20, y: (h - bh) / 2 - 8, width: backW, height: bh + 16)
-        backIcon.frame = CGRect(x: 0, y: 8 + (bh - 10) / 2, width: 10, height: 10)
-        backLabel.frame = CGRect(x: 14, y: 8, width: backW - 14 + 2, height: bh)
+        // 按得到的范围:左右各多 12、上下撑到 44
+        let bt = max(bh, 44)
+        back.frame = CGRect(x: 8, y: (h - bt) / 2, width: 12 + backW + 12, height: bt)
+        backIcon.frame = CGRect(x: 12, y: (bt - 14) / 2, width: 14, height: 14)
+        backLabel.frame = CGRect(x: 12 + 17, y: (bt - bh) / 2, width: backW - 17 + 2, height: bh)
         let rh = LXCRFont.f(11, 300).lineHeight
-        right.frame = CGRect(x: w - 20 - rightW, y: (h - rh) / 2 - 8, width: rightW, height: rh + 16)
+        right.frame = CGRect(x: w - 20 - rightInset - rightW, y: (h - rh) / 2 - 8, width: rightW, height: rh + 16)
         rightLabel.frame = CGRect(x: 0, y: 8, width: rightW + 2, height: rh)
-        let x0 = 20 + backW + 40, x1 = w - 20 - rightW - 40
+        let x0 = 20 + backW + 40, x1 = w - 20 - rightInset - rightW - 40
         title.frame = CGRect(x: x0, y: (h - 24) / 2, width: max(0, x1 - x0), height: 24)
     }
 }
@@ -848,9 +852,9 @@ final class LXCoReadVC: UIViewController, UIGestureRecognizerDelegate, UIDocumen
     // 浮层
     let nightToggle = LXCRPress()
     private let nightGlyph = LXCRLine()
-    let handle = LXCRPress()
-    private let handleBlur = UIVisualEffectView(effect: UIBlurEffect(style: .systemUltraThinMaterial))
-    private let handleGlyph = LXCRLine()
+    /// 回聊天:右上角 36 圆 ×,和 Terminal / Archive 的关闭钮同一种;共读每页同一个位置(1003 她选 A,替掉网页外壳贴左缘的细把手)
+    let closeBtn = LXCRPress()
+    private let closeGlyph = UIImageView()
     var ctxMenu: UIView?
     var ctxCatcher: UIControl?
     var cards: LXCRCards!
@@ -934,18 +938,16 @@ final class LXCoReadVC: UIViewController, UIGestureRecognizerDelegate, UIDocumen
         nightToggle.addSubview(nightGlyph)
         view.addSubview(nightToggle)
 
-        // 外壳的回聊天把手 .reader-close:贴左缘中间的细长条
-        handle.layer.cornerRadius = 8
-        handle.layer.maskedCorners = [.layerMaxXMinYCorner, .layerMaxXMaxYCorner]
-        handle.clipsToBounds = true
-        handleBlur.isUserInteractionEnabled = false
-        handle.addSubview(handleBlur)
-        handle.addSubview(handleGlyph)
-        handle.addAction(UIAction { [weak self] _ in self?.closeLibrary() }, for: .touchUpInside)
-        // 按下时变宽到 18(.reader-close:active)
-        handle.addAction(UIAction { [weak self] _ in self?.handleWidth(18) }, for: [.touchDown, .touchDragEnter])
-        handle.addAction(UIAction { [weak self] _ in self?.handleWidth(14) }, for: [.touchUpInside, .touchUpOutside, .touchCancel, .touchDragExit])
-        view.addSubview(handle)
+        closeBtn.layer.cornerRadius = 18
+        closeBtn.layer.borderWidth = 1
+        crShadow(closeBtn.layer, y: 2, blur: 8, a: 0.08)
+        closeGlyph.contentMode = .center
+        closeGlyph.isUserInteractionEnabled = false
+        closeBtn.addSubview(closeGlyph)
+        closeBtn.addAction(UIAction { [weak self] _ in self?.closeLibrary() }, for: .touchUpInside)
+        view.addSubview(closeBtn)      // 在各页之上、面板和卡片之下
+        topBar.rightInset = 44
+        recTop.rightInset = 44
 
         cards = LXCRCards(vc: self)
         panels = LXCRPanels(vc: self)
@@ -991,22 +993,20 @@ final class LXCoReadVC: UIViewController, UIGestureRecognizerDelegate, UIDocumen
         }
         nightToggle.frame = CGRect(x: W - 56, y: H - 56, width: 36, height: 36)
         nightGlyph.frame = nightToggle.bounds
-        handle.frame = CGRect(x: 0, y: (H - 56) / 2, width: handleW, height: 56)
-        handleBlur.frame = handle.bounds
-        handleGlyph.frame = CGRect(x: 0, y: 0, width: handle.bounds.width - 2, height: 56)
+        // 中线和 44 高的顶栏对齐
+        closeBtn.bounds = CGRect(x: 0, y: 0, width: 36, height: 36)
+        closeBtn.center = CGPoint(x: W - 16 - 18, y: safeTop + 22)
+        closeGlyph.frame = closeBtn.bounds
         view.bringSubviewToFront(nightToggle)
-        view.bringSubviewToFront(handle)
         panels.layout()
     }
 
-    private var handleW: CGFloat = 14
-    private func handleWidth(_ w: CGFloat) {
-        handleW = w
-        UIView.animate(withDuration: 0.16) {
-            self.handle.frame.size.width = w
-            self.handleBlur.frame = self.handle.bounds
-            self.handleGlyph.frame = CGRect(x: 0, y: 0, width: w - 2, height: 56)
-        }
+    /// 阅读页里 × 跟着顶栏一起进出,其他页一直在
+    func syncClose() {
+        let on = mode != .reading || chrome
+        closeBtn.alpha = on ? 1 : 0
+        closeBtn.transform = on ? .identity : CGAffineTransform(translationX: 0, y: -44)
+        closeBtn.isUserInteractionEnabled = on
     }
 
     // MARK: 配色
@@ -1020,15 +1020,11 @@ final class LXCoReadVC: UIViewController, UIGestureRecognizerDelegate, UIDocumen
         nightGlyph.text = crAttr(t.id == "night" ? "\u{263E}" : "\u{263C}", nf, t.ink3)
         nightGlyph.align = .center
         nightGlyph.baseline = (36 - nf.lineHeight) / 2 + nf.ascender
-        let dark = LXSheetInk.dark
-        handle.normalBg = dark ? UIColor(white: 1, alpha: 0.12) : crRGBA(120, 130, 150, 0.16)
-        handle.pressedBg = dark ? UIColor(white: 1, alpha: 0.20) : crRGBA(120, 130, 150, 0.30)
-        handleBlur.effect = UIBlurEffect(style: dark ? .systemUltraThinMaterialDark : .systemUltraThinMaterialLight)
-        handleBlur.alpha = 0.5
-        let hf = LXCRFont.f(13)
-        handleGlyph.text = crAttr("\u{2039}", hf, dark ? crRGBA(233, 229, 220, 0.72) : crRGBA(90, 100, 120, 0.75))
-        handleGlyph.align = .center
-        handleGlyph.baseline = (56 - hf.lineHeight) / 2 + hf.ascender
+        closeBtn.normalBg = t.surface
+        closeBtn.pressedBg = t.surface2
+        closeBtn.layer.borderColor = t.border.cgColor
+        closeGlyph.image = UIImage(systemName: "xmark", withConfiguration: UIImage.SymbolConfiguration(pointSize: 15, weight: .medium))
+        closeGlyph.tintColor = t.ink2
         topBar.configure(t, back: "书架", title: book?.title ?? "", right: "\u{26B2}")
         recTop.configure(t, back: "正文", title: "共读记录", right: nil)
         progTrack.backgroundColor = t.surface3
@@ -1072,7 +1068,7 @@ final class LXCoReadVC: UIViewController, UIGestureRecognizerDelegate, UIDocumen
         recordsWrap.isHidden = m != .records
         nightToggle.isHidden = m == .reading
         view.bringSubviewToFront(nightToggle)
-        view.bringSubviewToFront(handle)
+        syncClose()
         // .fade-in 只在真的换了一个界面时播:上移 6px + 淡入 0.35s
         if animated, shownMode != m {
             let target: UIView? = m == .shelf ? shelfScroll : m == .detail ? detailScroll : m == .reading ? table : recTable
@@ -1132,16 +1128,18 @@ final class LXCoReadVC: UIViewController, UIGestureRecognizerDelegate, UIDocumen
         // .shelf-head:顶 18、左右 4(加 .folio 的 16)、底 14;标题 26/600,计数 11px ink4,基线对齐
         let tf = LXCRFont.f(26, 600), cf = LXCRFont.f(11)
         let headLH: CGFloat = 26 * 1.6
-        let title = LXCRLine(frame: CGRect(x: 20, y: 18, width: W - 40, height: headLH))
+        // 1003 右上角放了回聊天的 ×:标题这一行的中线对齐 × 的中线(22),"N 本"让到 × 左边
+        let headY = 22 - headLH / 2
+        let title = LXCRLine(frame: CGRect(x: 20, y: headY, width: W - 40, height: headLH))
         title.text = crAttr("共读", tf, t.ink1)
         title.baseline = crBaseline(tf, headLH)
         add(title)
-        let count = LXCRLine(frame: CGRect(x: 20, y: 18, width: W - 40, height: headLH))
+        let count = LXCRLine(frame: CGRect(x: 20, y: headY, width: W - 20 - 64, height: headLH))
         count.text = crAttr(books.isEmpty ? "" : "\(books.count) 本", cf, t.ink4)
         count.baseline = title.baseline
         count.align = .right
         add(count)
-        var y = 18 + headLH + 14
+        var y = headY + headLH + 14
         // .add-book-row:虚线框 1px、圆角 10、内边距 13/14,加号 16 accent,字 15
         let row = LXCRPress(frame: CGRect(x: 16, y: y, width: W - 32, height: 13 + 24 + 13 + 2))
         row.normalBg = t.surface
@@ -1400,9 +1398,12 @@ final class LXCoReadVC: UIViewController, UIGestureRecognizerDelegate, UIDocumen
         var y: CGFloat = 56
         let nav = LXCRTopBar()
         nav.backgroundColor = .clear
-        nav.configure(t, back: "SHELF", title: "", right: nil)
+        nav.configure(t, back: "书架", title: "", right: nil)
         nav.backgroundColor = .clear
-        let navH = LXCRFont.f(10, 300).lineHeight + 8      // 这里的 nav-back 没有内边距,行高由 Rename(上下 4)撑
+        let rowH = LXCRFont.f(10, 300).lineHeight + 8      // 这里的 nav-back 没有内边距,行高由 Rename(上下 4)撑
+        // 返回放大后按的范围要 44 高:行的中线不动,往上下各撑开
+        let navH: CGFloat = 44
+        y += rowH / 2 - navH / 2
         nav.frame = CGRect(x: x0 - 20, y: y, width: cw + 40, height: navH)
         nav.back.addAction(UIAction { [weak self] _ in self?.goShelf() }, for: .touchUpInside)
         add(nav)
@@ -1418,7 +1419,7 @@ final class LXCoReadVC: UIViewController, UIGestureRecognizerDelegate, UIDocumen
         ren.pressedAlpha = 0.7
         ren.addAction(UIAction { [weak self] _ in self?.renameBook(b.id) }, for: .touchUpInside)
         add(ren)
-        y += navH + 20 + 20
+        y += navH / 2 + rowH / 2 + 20 + 20
         // .detail-hero:书名斜体 500 26px(手机),行高 1.15,下 8;meta 9px 300 字距 1
         let tf = LXCRFont.italic(26, 500)
         let title = LXCRText()
@@ -2433,6 +2434,7 @@ extension LXCoReadVC: UITableViewDataSource, UITableViewDelegate, UITextViewDele
             self.progTrack.transform = self.chrome ? .identity : CGAffineTransform(translationX: 0, y: -6)
             self.bottomBar.alpha = self.chrome ? 1 : 0
             self.bottomBar.transform = self.chrome ? .identity : CGAffineTransform(translationX: 0, y: self.bottomBar.bounds.height)
+            if self.mode == .reading { self.syncClose() }
         }
         topBar.isUserInteractionEnabled = chrome
         bottomBar.isUserInteractionEnabled = chrome
@@ -3638,7 +3640,6 @@ final class LXCRPanels: NSObject, UITextFieldDelegate {
         crAnimate(0.22) { self.tocScrim.alpha = 1 }
         crAnimate(0.28) { self.tocPanel.transform = .identity }
         crAnimate(0.2) { self.tocPanel.alpha = 1 }
-        vc.view.bringSubviewToFront(vc.handle)
     }
 
     func hideToc() {
