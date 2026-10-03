@@ -1072,6 +1072,28 @@ final class LXWatchVC: UIViewController, WKScriptMessageHandler, WKNavigationDel
     (function () {
       if (window.__lxw) return; window.__lxw = 1;
       var post = function (o) { try { window.webkit.messageHandlers.lxw.postMessage(o); } catch (e) {} };
+      // 1003 她:不要"打开 App"那些。B 站手机网页在播放器上盖了一层罩子(点播放其实点的是它,它把人送去 App),
+      // 还有顶上 Download App、"Open the App to watch more"、"点我去App发弹幕"、"App内观看更流畅"、卡片角上的 App 小标
+      var noApp = '.player-mask,.open-app.weakened,.open-app-img,[class*="openapp"],[class*="callapp"],' +
+        '[class*="launchapp"],[class*="launch-app"]{display:none!important}';
+      var addNoApp = function () {
+        if (document.getElementById('lxw-noapp')) return;
+        var root = document.head || document.documentElement;
+        if (!root) return;   // 太早了还没有页面骨架:等下面定时器再补
+        var st = document.createElement('style'); st.id = 'lxw-noapp'; st.textContent = noApp;
+        root.appendChild(st);
+      };
+      addNoApp();
+      document.addEventListener('DOMContentLoaded', addNoApp);
+      // 剩下包着"去 App"的那层(推荐视频卡片等):有网页地址就在这页里打开,没有就什么都不做
+      document.addEventListener('click', function (e) {
+        var el = e.target && e.target.closest ? e.target.closest('m-open-app') : null;
+        if (!el) return;
+        e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation();
+        var u = el.getAttribute('universallink') || '';
+        var ok = u.indexOf('https://m.bilibili.com/') === 0 || u.indexOf('https://www.bilibili.com/') === 0;
+        if (ok && u !== location.href) location.href = u;
+      }, true);
       var v = null, lastT = -1, lastRect = '', lastUrl = '';
       var info = function (ev) {
         return { ev: ev, t: v ? v.currentTime : 0, d: v && isFinite(v.duration) ? v.duration : 0,
@@ -1096,6 +1118,7 @@ final class LXWatchVC: UIViewController, WKScriptMessageHandler, WKNavigationDel
         rect();
       };
       setInterval(function () {
+        addNoApp();   // B 站页面会把 head 里后加的样式整个换掉,掉了就再补
         var nv = document.querySelector('video');
         if (nv && nv !== v) hook(nv);
         if (!nv && v) { v = null; post({ ev: 'gone', url: location.href, title: document.title }); }
