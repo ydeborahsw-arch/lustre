@@ -1,6 +1,7 @@
 import UIKit
 import WebKit
 import CryptoKit
+import AVFoundation
 
 // MARK: - 共看(1003 她的单)
 // App 里开 B 站网页,她登自己的号看。播放器走到哪、这一段的台词,攒成一包递进他那条线(/app/yan_note:只进他终端,
@@ -40,22 +41,154 @@ enum LXWatchNet {
 
     /// 截图先传上去,拿回来的那份就是附件(和聊天里发图同一个接口)
     static func upload(_ jpeg: Data, size: CGSize, done: @escaping ([String: Any]?) -> Void) {
-        let name = "watch-\(Int(Date().timeIntervalSince1970)).jpg"
+        put(jpeg, name: "watch-\(Int(Date().timeIntervalSince1970)).jpg", mime: "image/jpeg",
+            extra: ["width": Int(size.width), "height": Int(size.height)], done: done)
+    }
+
+    /// 语音同理:传上去拿回附件,带上时长(和聊天里发语音一样的气泡)
+    static func uploadVoice(_ m4a: Data, duration: Int, done: @escaping ([String: Any]?) -> Void) {
+        put(m4a, name: "voice-\(Int(Date().timeIntervalSince1970)).m4a", mime: "audio/mp4", extra: ["duration": duration], done: done)
+    }
+
+    private static func put(_ data: Data, name: String, mime: String, extra: [String: Any], done: @escaping ([String: Any]?) -> Void) {
         guard !LustreConfig.isPreview, !LustreConfig.secret.isEmpty,
               let u = URL(string: LustreConfig.apiBase + "/app/upload?name=" + name) else { done(nil); return }
         var r = URLRequest(url: u)
         r.httpMethod = "POST"
         r.timeoutInterval = 60
         r.setValue("Bearer " + LustreConfig.secret, forHTTPHeaderField: "Authorization")
-        r.setValue("image/jpeg", forHTTPHeaderField: "Content-Type")
-        URLSession.shared.uploadTask(with: r, from: jpeg) { data, resp, _ in
+        r.setValue(mime, forHTTPHeaderField: "Content-Type")
+        URLSession.shared.uploadTask(with: r, from: data) { data, resp, _ in
             var obj = data.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
             let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
             if !(200..<300).contains(code) || ((obj?["url"] as? String) ?? "").isEmpty { obj = nil }
-            obj?["width"] = Int(size.width)
-            obj?["height"] = Int(size.height)
+            if obj != nil { for (k, v) in extra { obj?[k] = v } }
             DispatchQueue.main.async { done(obj) }
         }.resume()
+    }
+}
+
+// MARK: - 共看页的"发语音":开着回声消除录,手机外放的视频声音尽量不进录音
+
+final class LXWatchRec {
+    enum Start { case ok, denied, failed }
+    private let engine = AVAudioEngine()
+    private var file: AVAudioFile?
+    private var url: URL?
+    private var t0 = Date()
+    private var startedAt = Date.distantPast
+
+    var isOn: Bool { file != nil }
+    var elapsed: TimeInterval { isOn ? Date().timeIntervalSince(t0) : 0 }
+
+    init() {
+        // 录到一半网页放视频把声音设置改成"只放不录",或者耳机、蓝牙换了:设置拿回来,接着录进同一个文件
+        NotificationCenter.default.addObserver(forName: AVAudioSession.routeChangeNotification, object: nil, queue: .main) { [weak self] n in
+            guard let s = self, s.isOn else { return }
+            let why = (n.userInfo?[AVAudioSessionRouteChangeReasonKey] as? NSNumber)?.uintValue ?? 0
+            guard why == AVAudioSession.RouteChangeReason.categoryChange.rawValue,
+                  AVAudioSession.sharedInstance().category != .playAndRecord else { return }
+            s.reconnect()
+        }
+        NotificationCenter.default.addObserver(forName: .AVAudioEngineConfigurationChange, object: engine, queue: .main) { [weak self] _ in
+            guard let s = self, s.isOn, Date().timeIntervalSince(s.startedAt) > 1 else { return }   // 自己刚开的那一下不算
+            s.reconnect()
+        }
+    }
+
+    func start(_ done: @escaping (Start) -> Void) {
+        AVAudioSession.sharedInstance().requestRecordPermission { granted in
+            DispatchQueue.main.async { done(granted ? (self.begin() ? .ok : .failed) : .denied) }
+        }
+    }
+
+    private func setSession() throws {
+        let ses = AVAudioSession.sharedInstance()
+        try ses.setCategory(.playAndRecord, mode: .voiceChat, options: [.defaultToSpeaker, .allowBluetooth])
+        try ses.setActive(true)
+    }
+
+    private func begin() -> Bool {
+        guard file == nil else { return true }
+        do {
+            try setSession()
+            let input = engine.inputNode
+            if !input.isVoiceProcessingEnabled { try input.setVoiceProcessingEnabled(true) }
+            if #available(iOS 17.0, *) {
+                var duck = input.voiceProcessingOtherAudioDuckingConfiguration   // 只减回声,不把视频的声音压小
+                duck.duckingLevel = .min
+                input.voiceProcessingOtherAudioDuckingConfiguration = duck
+            }
+            _ = engine.mainMixerNode   // 回声消除要收、放两头都在
+            let rate = input.outputFormat(forBus: 0).sampleRate
+            guard rate > 0 else { restore(); return false }
+            let u = FileManager.default.temporaryDirectory.appendingPathComponent("lx-watch-voice.m4a")
+            try? FileManager.default.removeItem(at: u)
+            let f = try AVAudioFile(forWriting: u, settings: [AVFormatIDKey: kAudioFormatMPEG4AAC, AVSampleRateKey: rate,
+                                                             AVNumberOfChannelsKey: 1],
+                                    commonFormat: .pcmFormatFloat32, interleaved: false)
+            file = f
+            url = u
+            try run(f)
+            t0 = Date()
+            return true
+        } catch {
+            engine.inputNode.removeTap(onBus: 0)
+            engine.stop()
+            file = nil
+            url = nil
+            restore()
+            return false
+        }
+    }
+
+    /// 收音接到文件上:只要第一声道;采样率和文件对不上(换了耳机)的那几段不写,免得写坏
+    private func run(_ f: AVAudioFile) throws {
+        let input = engine.inputNode
+        let fmt = input.outputFormat(forBus: 0)
+        let mono = f.processingFormat
+        input.installTap(onBus: 0, bufferSize: 2048, format: fmt) { buf, _ in
+            guard buf.format.sampleRate == mono.sampleRate, let src = buf.floatChannelData?[0],
+                  let out = AVAudioPCMBuffer(pcmFormat: mono, frameCapacity: buf.frameLength),
+                  let dst = out.floatChannelData?[0] else { return }
+            out.frameLength = buf.frameLength
+            memcpy(dst, src, Int(buf.frameLength) * MemoryLayout<Float>.size)
+            try? f.write(from: out)
+        }
+        engine.prepare()
+        startedAt = Date()
+        try engine.start()
+    }
+
+    private func reconnect() {
+        guard let f = file else { return }
+        engine.inputNode.removeTap(onBus: 0)
+        engine.stop()
+        do {
+            try setSession()
+            try run(f)
+        } catch {
+            engine.inputNode.removeTap(onBus: 0)   // 接不回来:录到的那段还在,点发送照样发
+        }
+    }
+
+    /// 停下;返回录好的文件和时长(没在录就是 nil)
+    @discardableResult
+    func stop() -> (url: URL, duration: TimeInterval)? {
+        guard file != nil, let u = url else { return nil }
+        let d = Date().timeIntervalSince(t0)
+        engine.inputNode.removeTap(onBus: 0)
+        engine.stop()
+        file = nil
+        url = nil
+        restore()
+        return (url: u, duration: d)
+    }
+
+    /// 不停用整个声音会话(网页里的视频也在里面,一停视频就断声),改回只放不录交还给网页;正在通话就不动
+    private func restore() {
+        guard !LXCallSession.shared.isActive else { return }
+        try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .default, options: [])
     }
 }
 
@@ -564,6 +697,37 @@ final class LXWatchVC: UIViewController, WKScriptMessageHandler, WKNavigationDel
     private var backObs: NSKeyValueObservation?
     private let debugL = UILabel()           // 预览:本来要递给他的纸条显示在这里
     var simulating = false
+    // 1003 她:看的时候不停下来打字——话筒点开选"发语音"或"语音通话"(和聊天页一样),都开回声消除
+    private let micBtn = UIButton(type: .system)
+    private let floatMic = UIButton(type: .system)
+    private let recL = UILabel()             // 录音时占输入框的位置:● 0:07 · 说完点右边发送
+    private let rec = LXWatchRec()
+    private var recTick: Timer?
+    private let callChip = UIView()          // 通话条:竖屏在顶栏标题的位置,横屏浮在左上
+    private let callL = UILabel()
+    private let callMute = UIButton(type: .system)
+    private let callEnd = UIButton(type: .system)
+    private var callTick: Timer?
+    private var callShown = false
+    private var previewRec = false           // 预览:假装在录 / 在通话,只画样子
+    private var previewCall = false
+    private var recording: Bool { rec.isOn || previewRec }
+
+    /// 共看页正摆在屏幕上
+    static var isShowing: Bool { shared.isViewLoaded && shared.view.window != nil }
+
+    /// 通话里她每说一句,共看页开着就带上"看到哪了"(和打字一样;带过去的台词就算递过了)
+    static func callContext(sid: String) -> String? {
+        guard isShowing, sid == "yan-main" else { return nil }
+        let c = shared.tracker.context()
+        return c.isEmpty ? nil : c
+    }
+
+    /// 通话开始、挂断(包括别处挂的、他打进来接起的)都叫一下
+    static func callChanged() {
+        guard isShowing else { return }
+        shared.syncCall()
+    }
 
     override var supportedInterfaceOrientations: UIInterfaceOrientationMask { landscape ? .landscape : .portrait }
     override var prefersStatusBarHidden: Bool { landscape }
@@ -630,9 +794,12 @@ final class LXWatchVC: UIViewController, WKScriptMessageHandler, WKNavigationDel
         for v in [backBtn, titleL, fullBtn, moreBtn, closeBtn] as [UIView] { topBar.addSubview(v) }
         view.addSubview(topBar)
 
-        // 底栏:截图 / 跟他说… / 发送
+        // 底栏:截图 / 跟他说… / 话筒(有字时换成发送);录音时:取消 / ● 时长 / 发送
         sym(shotBtn, "camera", 18)
-        shotBtn.addAction(UIAction { [weak self] _ in self?.takeShot() }, for: .touchUpInside)
+        shotBtn.addAction(UIAction { [weak self] _ in
+            guard let s = self else { return }
+            if s.recording { s.cancelRec() } else { s.takeShot() }
+        }, for: .touchUpInside)
         field.placeholder = "跟他说…"
         field.font = .systemFont(ofSize: 16)
         field.layer.cornerRadius = 18
@@ -641,8 +808,17 @@ final class LXWatchVC: UIViewController, WKScriptMessageHandler, WKNavigationDel
         field.returnKeyType = .send
         field.delegate = self
         sym(sendBtn, "arrow.up.circle.fill", 30)
-        sendBtn.addAction(UIAction { [weak self] _ in self?.sendTyped() }, for: .touchUpInside)
-        for v in [barLine, shotBtn, field, sendBtn] as [UIView] { bar.addSubview(v) }
+        sendBtn.addAction(UIAction { [weak self] _ in
+            guard let s = self else { return }
+            if s.recording { s.finishRec() } else { s.sendTyped() }
+        }, for: .touchUpInside)
+        field.addAction(UIAction { [weak self] _ in self?.syncSend() }, for: .editingChanged)
+        sym(micBtn, "mic", 20)
+        micBtn.showsMenuAsPrimaryAction = true
+        micBtn.menu = micMenu()
+        recL.font = .monospacedDigitSystemFont(ofSize: 15, weight: .regular)
+        recL.isHidden = true
+        for v in [barLine, shotBtn, field, recL, micBtn, sendBtn] as [UIView] { bar.addSubview(v) }
         view.addSubview(bar)
 
         // 横屏的小按钮
@@ -660,8 +836,36 @@ final class LXWatchVC: UIViewController, WKScriptMessageHandler, WKNavigationDel
             b.addTarget(self, action: act, for: .touchUpInside)
             floatBar.addArrangedSubview(b)
         }
+        sym(floatMic, "mic", 17)
+        floatMic.tintColor = .white
+        floatMic.backgroundColor = UIColor(white: 0, alpha: 0.45)
+        floatMic.layer.cornerRadius = 20
+        floatMic.widthAnchor.constraint(equalToConstant: 40).isActive = true
+        floatMic.heightAnchor.constraint(equalToConstant: 40).isActive = true
+        floatMic.showsMenuAsPrimaryAction = true
+        floatMic.menu = micMenu()
+        floatBar.insertArrangedSubview(floatMic, at: 2)
         floatBar.isHidden = true
         view.addSubview(floatBar)
+
+        // 通话条:时长 · 在听/在想/在说 / 静音 / 挂断
+        callChip.layer.cornerRadius = 17
+        callChip.isHidden = true
+        callL.font = .monospacedDigitSystemFont(ofSize: 13, weight: .medium)
+        callMute.addAction(UIAction { [weak self] _ in
+            LXCallSession.shared.toggleMute()
+            self?.syncCall()
+        }, for: .touchUpInside)
+        sym(callEnd, "phone.down.fill", 13)
+        callEnd.tintColor = .white
+        callEnd.backgroundColor = .systemRed
+        callEnd.layer.cornerRadius = 13
+        callEnd.addAction(UIAction { [weak self] _ in
+            LXCallSession.shared.hangUp()
+            self?.syncCall()
+        }, for: .touchUpInside)
+        for v in [callL, callMute, callEnd] as [UIView] { callChip.addSubview(v) }
+        view.addSubview(callChip)
 
         if LustreConfig.isPreview {
             debugL.numberOfLines = 0
@@ -675,6 +879,7 @@ final class LXWatchVC: UIViewController, WKScriptMessageHandler, WKNavigationDel
                                                name: UIResponder.keyboardWillChangeFrameNotification, object: nil)
         applyTheme()
         refreshMenu()
+        syncSend()
         if !LustreConfig.isPreview, let u = URL(string: Self.home) { web.load(URLRequest(url: u)) }
     }
 
@@ -683,13 +888,27 @@ final class LXWatchVC: UIViewController, WKScriptMessageHandler, WKNavigationDel
         applyTheme()
     }
 
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        LXCallSession.shared.refreshEcho()   // 正在通话时进来:收音换成带回声消除的
+        syncCall()
+    }
+
+    override func viewDidDisappear(_ animated: Bool) {
+        super.viewDidDisappear(animated)
+        LXCallSession.shared.refreshEcho()   // 出去了:没有视频在放,收音换回原样
+        callTick?.invalidate(); callTick = nil
+    }
+
     private func applyTheme() {
         let dark = LXSheetInk.dark
         view.backgroundColor = dark ? .black : .white
         topBar.backgroundColor = view.backgroundColor
         bar.backgroundColor = view.backgroundColor
         barLine.backgroundColor = LXSheetInk.sep
-        for b in [backBtn, fullBtn, moreBtn, shotBtn] { b.tintColor = LXSheetInk.icon }
+        for b in [backBtn, fullBtn, moreBtn, shotBtn, micBtn] { b.tintColor = LXSheetInk.icon }
+        recL.textColor = LXSheetInk.text
+        paintCallChip()
         titleL.textColor = LXSheetInk.text
         closeBtn.tintColor = LXSheetInk.icon
         closeBtn.backgroundColor = LXSheetInk.tile
@@ -732,7 +951,7 @@ final class LXWatchVC: UIViewController, WKScriptMessageHandler, WKNavigationDel
         if landscape {
             topBar.isHidden = true
             web.frame = view.bounds
-            bar.isHidden = !talking
+            bar.isHidden = !(talking || recording)
             let bottom = kbH > 0 ? H - kbH : H - st.bottom
             bar.frame = CGRect(x: 0, y: bottom - barH, width: W, height: barH)
             floatBar.sizeToFit()
@@ -754,8 +973,11 @@ final class LXWatchVC: UIViewController, WKScriptMessageHandler, WKNavigationDel
         barLine.frame = CGRect(x: 0, y: 0, width: W, height: 0.5)
         shotBtn.frame = CGRect(x: 8 + st.left, y: 4, width: 44, height: 44)
         sendBtn.frame = CGRect(x: W - st.right - 8 - 44, y: 4, width: 44, height: 44)
+        micBtn.frame = sendBtn.frame
         field.frame = CGRect(x: shotBtn.frame.maxX + 4, y: 8, width: max(0, sendBtn.frame.minX - 4 - shotBtn.frame.maxX - 4), height: 36)
+        recL.frame = field.frame.insetBy(dx: 14, dy: 0)
         layoutDanmaku()
+        layoutCallChip()
         if LustreConfig.isPreview {
             let h: CGFloat = 150
             debugL.frame = CGRect(x: 0, y: (landscape ? H : bar.frame.minY) - h, width: W, height: h)
@@ -869,13 +1091,14 @@ final class LXWatchVC: UIViewController, WKScriptMessageHandler, WKNavigationDel
         }
         setNeedsStatusBarAppearanceUpdate()
         setNeedsUpdateOfHomeIndicatorAutoHidden()
+        paintCallChip()
         view.setNeedsLayout()
     }
 
     @objc private func exitLandscape() { setLandscape(false) }
 
     @objc private func webTapped() {
-        guard landscape, !talking else { return }
+        guard landscape, !talking, !recording else { return }
         floatBar.isHidden = false
         floatHide?.cancel()
         let w = DispatchWorkItem { [weak self] in self?.floatBar.isHidden = true }
@@ -915,12 +1138,179 @@ final class LXWatchVC: UIViewController, WKScriptMessageHandler, WKNavigationDel
         let s = (field.text ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         guard !s.isEmpty else { return }
         field.text = ""
+        syncSend()
         let ctx = tracker.context()
         LXWatchNet.send(text: s, context: ctx) { [weak self] ok in
             self?.toast(ok ? "发过去了" : "没发出去,再试一次")
-            if !ok, self?.field.text?.isEmpty == true { self?.field.text = s }
+            if !ok, self?.field.text?.isEmpty == true { self?.field.text = s; self?.syncSend() }
         }
         if landscape { talking = false; view.endEditing(true); view.setNeedsLayout() }
+    }
+
+    /// 输入框有字=发送键,没字=话筒;录音时=发送(点了就发这段语音)
+    private func syncSend() {
+        let has = !(field.text ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        let rec = recording
+        sendBtn.isHidden = !(has || rec)
+        micBtn.isHidden = has || rec
+        field.isHidden = rec
+        recL.isHidden = !rec
+        shotBtn.setImage(UIImage(systemName: rec ? "xmark" : "camera",
+                                 withConfiguration: UIImage.SymbolConfiguration(pointSize: 18, weight: .medium)), for: .normal)
+    }
+
+    /// 话筒点开:发语音 / 语音通话(和聊天页那个一样);通话中两样都先停用
+    private func micMenu() -> UIMenu {
+        UIMenu(children: [UIDeferredMenuElement.uncached { [weak self] done in
+            self?.floatHide?.cancel()   // 横屏小按钮 3 秒自动收,菜单开着时别收
+            let busy = LXCallSession.shared.isActive || (self?.recording ?? false)
+            let voice = UIAction(title: "发语音", image: UIImage(systemName: "mic"),
+                                 attributes: busy ? .disabled : []) { _ in self?.startRec() }
+            let call = UIAction(title: LXCallSession.shared.isActive ? "通话中" : "语音通话", image: UIImage(systemName: "phone"),
+                                attributes: busy ? .disabled : []) { _ in self?.startCall() }
+            done([voice, call])
+        }])
+    }
+
+    // MARK: 语音通话(就是聊天页那个通话;从这里打出去不弹大通话页,这页上一条通话条)
+
+    private func startCall() {
+        guard !LustreConfig.isPreview, !LXCallSession.shared.isActive else { return }
+        floatBar.isHidden = true
+        LXCallSession.shared.startOutgoing(sid: "yan-main", quiet: true)
+        syncCall()
+    }
+
+    func syncCall() {
+        let s = LXCallSession.shared
+        let on = s.isActive || previewCall
+        if on {
+            let state: String
+            if previewCall { state = "在听" }
+            else {
+                switch s.phase {
+                case .connecting: state = "接通中"
+                case .listening: state = s.muted ? "静音中" : "在听"
+                case .thinking: state = "在想"
+                case .speaking: state = "在说"
+                }
+            }
+            callL.text = (previewCall ? "00:42" : s.elapsedText) + " · " + state
+            callMute.setImage(UIImage(systemName: s.muted ? "mic.slash.fill" : "mic.fill",
+                                      withConfiguration: UIImage.SymbolConfiguration(pointSize: 13, weight: .medium)), for: .normal)
+            if callTick == nil {
+                callTick = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in self?.syncCall() }
+            }
+        } else {
+            callTick?.invalidate(); callTick = nil
+        }
+        guard on != callShown else { layoutCallChip(); return }
+        callShown = on
+        callChip.isHidden = !on
+        view.setNeedsLayout()
+    }
+
+    private func paintCallChip() {
+        let fg: UIColor = landscape ? .white : LXSheetInk.text
+        callChip.backgroundColor = landscape ? UIColor(white: 0, alpha: 0.45) : LXSheetInk.chip
+        callL.textColor = fg
+        callMute.tintColor = fg
+    }
+
+    /// 竖屏:顶栏标题那块换成通话条;横屏:浮在左上角
+    private func layoutCallChip() {
+        titleL.isHidden = callShown && !landscape
+        guard callShown else { return }
+        // 宽度按最宽的那种量一次,状态字两个三个来回换时通话条不跳
+        let probe = UILabel()
+        probe.font = callL.font
+        probe.text = "00:00 · 接通中"
+        let lw = ceil(max(probe.sizeThatFits(CGSize(width: 240, height: 34)).width,
+                          callL.sizeThatFits(CGSize(width: 240, height: 34)).width))
+        let w: CGFloat = lw + 82
+        let h: CGFloat = 34
+        let st = view.safeAreaInsets
+        if landscape {
+            callChip.frame = CGRect(x: st.left + 16, y: max(st.top, 12), width: w, height: h)
+        } else {
+            let mid = topBar.frame.minX + titleL.frame.midX
+            callChip.frame = CGRect(x: max(52, mid - w / 2), y: topBar.frame.minY + 5, width: w, height: h)
+        }
+        callL.frame = CGRect(x: 12, y: 0, width: lw, height: h)
+        callMute.frame = CGRect(x: callL.frame.maxX + 6, y: 2, width: 30, height: 30)
+        callEnd.frame = CGRect(x: w - 4 - 26, y: 4, width: 26, height: 26)
+        view.bringSubviewToFront(callChip)
+    }
+
+    // MARK: 发语音:开回声消除录,点发送就传上去,和打字一样带上看到哪了
+
+    private func startRec() {
+        guard !recording, !LXCallSession.shared.isActive else { return }
+        if LustreConfig.isPreview { previewRec = true; enterRecUI(); return }
+        rec.start { [weak self] res in
+            guard let s = self else { return }
+            switch res {
+            case .ok: s.enterRecUI()
+            case .denied: s.toast("录不了音,去 设置 里给 App 打开麦克风")
+            case .failed: s.toast("录音没开起来,再点一次试试")
+            }
+        }
+    }
+
+    private func enterRecUI() {
+        view.endEditing(true)
+        talking = false
+        floatBar.isHidden = true
+        syncSend()
+        renderRec()
+        recTick?.invalidate()
+        recTick = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in self?.renderRec() }
+        view.setNeedsLayout()
+    }
+
+    private func exitRecUI() {
+        recTick?.invalidate(); recTick = nil
+        previewRec = false
+        syncSend()
+        view.setNeedsLayout()
+    }
+
+    private func renderRec() {
+        let sec = previewRec ? 7 : Int(rec.elapsed)
+        let s = NSMutableAttributedString(string: "● ", attributes: [.foregroundColor: UIColor.systemRed])
+        s.append(NSAttributedString(string: String(format: "%d:%02d · 说完点右边发送", sec / 60, sec % 60),
+                                    attributes: [.foregroundColor: LXSheetInk.text]))
+        recL.attributedText = s
+    }
+
+    private func cancelRec() {
+        if let r = rec.stop() { try? FileManager.default.removeItem(at: r.url) }
+        exitRecUI()
+    }
+
+    private func finishRec() {
+        if previewRec {
+            exitRecUI()
+            LXWatchNet.send(text: "[语音 0:07]", context: tracker.context()) { _ in }
+            return
+        }
+        guard let r = rec.stop() else { exitRecUI(); return }
+        exitRecUI()
+        let secs = Int(r.duration.rounded())
+        // 文件收尾要一点点时间,稍等再读
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
+            let data = try? Data(contentsOf: r.url)
+            try? FileManager.default.removeItem(at: r.url)
+            guard let s = self else { return }
+            guard let d = data, d.count > 2000, secs >= 1 else { s.toast("太短了,没发出去"); return }
+            s.toast("正在发…")
+            LXWatchNet.uploadVoice(d, duration: secs) { att in
+                guard let att else { s.toast("没发出去,再试一次"); return }
+                LXWatchNet.send(text: "", context: s.tracker.context(), attachments: [att]) { ok in
+                    s.toast(ok ? "发过去了" : "没发出去,再试一次")
+                }
+            }
+        }
     }
 
     /// 先试从网页里把这一帧画下来(视频允许的话是真画面);不行再截网页上视频那一块
@@ -1018,6 +1408,7 @@ final class LXWatchVC: UIViewController, WKScriptMessageHandler, WKNavigationDel
     private func close() {
         web.evaluateJavaScript("document.querySelectorAll('video').forEach(function (v) { v.pause(); })", completionHandler: nil)
         view.endEditing(true)
+        if recording { cancelRec() }   // 录到一半的语音不发;通话不挂,回到聊天页上是那颗小胶囊
         if landscape {
             setLandscape(false)
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { self.dismiss(animated: true) }
@@ -1060,7 +1451,13 @@ final class LXWatchVC: UIViewController, WKScriptMessageHandler, WKNavigationDel
     func previewType(_ s: String) {
         field.becomeFirstResponder()
         field.text = s
+        syncSend()
     }
+
+    func previewCallOn(_ on: Bool) { previewCall = on; syncCall() }
+    func previewFloat() { webTapped() }
+    func previewRecOn() { startRec() }
+    func previewRecSend() { finishRec() }
 
     func previewSend() { sendTyped() }
 
@@ -1176,13 +1573,17 @@ enum LXWatchPreview {
         mark.backgroundColor = UIColor(red: 1, green: 0, blue: 1, alpha: 1)
         let phase = UIView(frame: CGRect(x: 28, y: 70, width: 20, height: 20))
         let steps: [(UIColor, () -> Void)] = [
-            (.yellow, { }),                                                                     // 页面打开
-            (.cyan, { vc.previewPlay(); vc.danmaku.shoot("这一段我也想看。她回头的时候。找到你了") }),   // 弹幕
+            (.yellow, { }),                                                                     // 页面打开,底栏是话筒
+            (.cyan, { vc.previewPlay(); vc.previewCallOn(true)                                  // 弹幕 + 竖屏通话条
+                      vc.danmaku.shoot("这一段我也想看。她回头的时候。找到你了") }),
             (.red, { vc.previewSimulate() }),                                                   // 开始 + 一包台词
             (UIColor(red: 0.5, green: 0, blue: 1, alpha: 1), { vc.previewPause() }),             // 暂停 5 秒后提醒
-            (.white, { vc.setLandscape(true); vc.danmaku.shoot("横屏也飘得过去吗。") }),           // 横屏
-            (.gray, { vc.setLandscape(false); vc.previewType("刚才那句好好哭") }),                // 打字,键盘起来
+            (.white, { vc.setLandscape(true); vc.danmaku.shoot("横屏也飘得过去吗。")             // 横屏:通话条左上 + 小按钮带话筒
+                       DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { vc.previewFloat() } }),
+            (.gray, { vc.setLandscape(false); vc.previewCallOn(false); vc.previewType("刚才那句好好哭") }),   // 打字,话筒换成发送
             (.orange, { vc.previewSend(); vc.view.endEditing(true); vc.previewShot() }),        // 发出去带进度 + 截图
+            (.green, { vc.previewRecOn()                                                        // 发语音:录音条,8 秒后发
+                       DispatchQueue.main.asyncAfter(deadline: .now() + 8) { vc.previewRecSend() } }),
         ]
         for (i, st) in steps.enumerated() {
             DispatchQueue.main.asyncAfter(deadline: .now() + 6 + Double(i) * 16) {

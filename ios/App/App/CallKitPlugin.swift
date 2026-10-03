@@ -141,7 +141,15 @@ final class LXCallCenter: NSObject, PKPushRegistryDelegate, CXProviderDelegate {
     func provider(_ provider: CXProvider, didActivate audioSession: AVAudioSession) {
         DispatchQueue.main.async { LXCallSession.shared.onAudioActivated() }
     }
-    func provider(_ provider: CXProvider, didDeactivate audioSession: AVAudioSession) {}
+    func provider(_ provider: CXProvider, didDeactivate audioSession: AVAudioSession) {
+        // 1003 共看页里挂断:系统把声音会话收走了,视频也跟着没声。改回只放不录、重新打开,把声音还给网页
+        DispatchQueue.main.async {
+            guard LXWatchVC.isShowing, !LXCallSession.shared.isActive else { return }
+            let ses = AVAudioSession.sharedInstance()
+            try? ses.setCategory(.playback, mode: .default, options: [])
+            try? ses.setActive(true)
+        }
+    }
 
     private func post(_ path: String, _ body: [String: Any]) {
         guard let url = URL(string: LustreConfig.apiBase + path) else { return }
@@ -233,14 +241,58 @@ final class LXCallSession: NSObject, AVAudioPlayerDelegate {
     private var streamBuf = ""
     private var spoken = 0
     private var view: LXCallView?
+    private var quietStart = false
 
     var isActive: Bool { active }
+    var isSpeaking: Bool { speaking }
 
     override init() {
         super.init()
         NotificationCenter.default.addObserver(forName: UIApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
             guard let s = self, s.active, s.view == nil else { return }
             s.showView()
+        }
+        // 1003 共看页里打电话:网页一放视频,WebKit 会把声音设置改成"只放不录",麦克风就断了;
+        // 耳机插拔、蓝牙连上也会让收音停下。通话中遇到这些,把通话的设置拿回来、收音接上。
+        NotificationCenter.default.addObserver(forName: AVAudioSession.routeChangeNotification, object: nil, queue: .main) { [weak self] n in
+            guard let s = self, s.active else { return }
+            let why = (n.userInfo?[AVAudioSessionRouteChangeReasonKey] as? NSNumber)?.uintValue ?? 0
+            guard why == AVAudioSession.RouteChangeReason.categoryChange.rawValue,
+                  AVAudioSession.sharedInstance().category != .playAndRecord else { return }
+            s.restartAudio()
+        }
+        NotificationCenter.default.addObserver(forName: .AVAudioEngineConfigurationChange, object: engine, queue: .main) { [weak self] _ in
+            // 自己刚开/刚重接的那一下也会报一次,1 秒内的不算
+            guard let s = self, s.active, Date().timeIntervalSince(s.engineStartedAt) > 1 else { return }
+            s.restartAudio()
+        }
+    }
+    private var restarting = false
+    private var engineStartedAt = Date.distantPast
+
+    /// 共看页开着=手机外放着视频:收音要开回声消除,把手机自己放出来的声音从麦克风里减掉;没开着就照旧
+    static var wantsEchoCancel: Bool { LXWatchVC.isShowing }
+
+    /// 共看页开/关时调一下:回声消除该开该关和现在不一样,就把收音重接一次
+    func refreshEcho() {
+        guard active, engine.isRunning, engine.inputNode.isVoiceProcessingEnabled != Self.wantsEchoCancel else { return }
+        restartAudio()
+    }
+
+    private func restartAudio() {
+        guard active, !restarting else { return }   // 接二连三来的只重接一次
+        restarting = true
+        let ses = AVAudioSession.sharedInstance()
+        if ses.category != .playAndRecord || ses.mode != .voiceChat {
+            try? ses.setCategory(.playAndRecord, mode: .voiceChat, options: [.allowBluetooth, .defaultToSpeaker])
+            applySpeaker()
+        }
+        stopRecognition()
+        if tapOn { engine.inputNode.removeTap(onBus: 0); tapOn = false }
+        engine.stop()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+            self?.restarting = false
+            self?.startEngine()
         }
     }
 
@@ -251,9 +303,11 @@ final class LXCallSession: NSObject, AVAudioPlayerDelegate {
         return zhao ? (LXNick.zhao, "zhao") : (LXNick.yan, "ai")
     }
 
-    func startOutgoing() {
-        guard !active else { view?.expand(); return }
-        let s = Self.apiSid(ChatListPlugin.live?.data.session ?? "")
+    /// quiet:从共看页打出去——聊天页上的大通话页不弹出来(只留聊天页的小胶囊),共看页自己画一条通话条
+    func startOutgoing(sid forced: String? = nil, quiet: Bool = false) {
+        guard !active else { if !quiet { view?.expand() }; return }
+        let s = forced ?? Self.apiSid(ChatListPlugin.live?.data.session ?? "")
+        quietStart = quiet
         begin(callId: "call-" + String(Int(Date().timeIntervalSince1970 * 1000), radix: 36), sid: s, who: Self.peer(s).name, firstLine: nil)
         viaCallKit = true
         LXCallCenter.shared.startOutgoing(name: who) { [weak self] in
@@ -308,6 +362,7 @@ final class LXCallSession: NSObject, AVAudioPlayerDelegate {
         if !sid.isEmpty { body["api_session"] = sid }
         post("/app/call", body)
         showView()
+        LXWatchVC.callChanged()
         tick?.invalidate()
         tick = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] _ in self?.onTick() }
         if let f = firstLine { speak(f) }
@@ -340,6 +395,17 @@ final class LXCallSession: NSObject, AVAudioPlayerDelegate {
     private func startEngine() {
         guard active, !engine.isRunning else { return }
         let input = engine.inputNode
+        let echo = Self.wantsEchoCancel
+        if input.isVoiceProcessingEnabled != echo { try? input.setVoiceProcessingEnabled(echo) }
+        if echo {
+            _ = engine.mainMixerNode   // 回声消除要收、放两头都在
+            if #available(iOS 17.0, *) {
+                // 只减回声,不把视频的声音压小
+                var duck = input.voiceProcessingOtherAudioDuckingConfiguration
+                duck.duckingLevel = .min
+                input.voiceProcessingOtherAudioDuckingConfiguration = duck
+            }
+        }
         let fmt = input.outputFormat(forBus: 0)
         guard fmt.sampleRate > 0 else {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in self?.startEngine() }
@@ -361,6 +427,7 @@ final class LXCallSession: NSObject, AVAudioPlayerDelegate {
         }
         tapOn = true
         engine.prepare()
+        engineStartedAt = Date()
         do { try engine.start() } catch {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in self?.startEngine() }
             return
@@ -413,6 +480,7 @@ final class LXCallSession: NSObject, AVAudioPlayerDelegate {
         if !text.isEmpty {
             var body: [String: Any] = ["text": text, "source": "native_speech", "call_id": callId]
             if !sid.isEmpty { body["api_session"] = sid }
+            if let ctx = LXWatchVC.callContext(sid: sid) { body["context"] = ctx }   // 共看页开着:带上看到哪了
             post("/app/voice", body)
             line = ""
             phase = .thinking
@@ -545,6 +613,7 @@ final class LXCallSession: NSObject, AVAudioPlayerDelegate {
     private func close(fromSystem: Bool) {
         guard active else { return }
         active = false
+        quietStart = false
         tick?.invalidate(); tick = nil
         stopRecognition()
         if tapOn { engine.inputNode.removeTap(onBus: 0); tapOn = false }
@@ -568,10 +637,18 @@ final class LXCallSession: NSObject, AVAudioPlayerDelegate {
             }
         }
         if !fromSystem { LXCallCenter.shared.endLocal() }
-        if !viaCallKit { try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation) }
+        if !viaCallKit {
+            if LXWatchVC.isShowing {
+                // 共看页的视频还在放:不停用声音会话(一停视频就断声),改回只放不录交还给网页
+                try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .default, options: [])
+            } else {
+                try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+            }
+        }
         LXCallPill.hide()
         view?.dismiss()
         view = nil
+        LXWatchVC.callChanged()
     }
 
     private func showView() {
@@ -582,7 +659,14 @@ final class LXCallSession: NSObject, AVAudioPlayerDelegate {
         v.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         host.addSubview(v)
         view = v
-        v.present()
+        if quietStart {
+            quietStart = false
+            v.alpha = 0
+            v.isHidden = true
+            LXCallPill.show(host: host, started: startedAt) { [weak self] in self?.view?.expand() }
+        } else {
+            v.present()
+        }
     }
 
     func minimize() {

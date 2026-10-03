@@ -89,7 +89,7 @@ jobs:
           elif [ "$LX_PREVIEW_FOCUS" = "watch" ]; then
             # The co-watch page opens full screen over everything on a public video (no login, no account data).
             # Progress and subtitles are simulated; anything that would go out is shown in a debug strip instead.
-            # Seven steps, 16 s each, starting about 6 s after the chat finishes loading; one step turns the screen sideways.
+            # Eight steps, 16 s each, starting about 6 s after the chat finishes loading; one step turns the screen sideways.
             sleep 5
             end=$((SECONDS + 150)); i=0
             while [ $SECONDS -lt $end ]; do shot w$i; i=$((i + 1)); sleep 2; done
