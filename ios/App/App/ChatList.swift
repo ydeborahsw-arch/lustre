@@ -3653,15 +3653,15 @@ final class LXPocketCell: UITableViewCell {
         ring.addSubview(glyphV)
         tCol.translatesAutoresizingMaskIntoConstraints = false
         amtL.translatesAutoresizingMaskIntoConstraints = false
-        amtL.font = .systemFont(ofSize: 17, weight: .semibold)
+        amtL.font = LXCardSheet.anthro(17, semibold: true)
         amtL.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         stateL.translatesAutoresizingMaskIntoConstraints = false
-        stateL.font = .systemFont(ofSize: 12)
+        stateL.font = LXCardSheet.anthro(12)
         stateL.textAlignment = .right
         stateL.setContentCompressionResistancePriority(.required, for: .horizontal)
         stateL.setContentHuggingPriority(.required, for: .horizontal)
         subL.translatesAutoresizingMaskIntoConstraints = false
-        subL.font = .systemFont(ofSize: 13)
+        subL.font = LXCardSheet.anthro(13)
         subL.numberOfLines = 1
         subL.lineBreakMode = .byTruncatingTail
         subL.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
@@ -3670,14 +3670,14 @@ final class LXPocketCell: UITableViewCell {
 
         coin.translatesAutoresizingMaskIntoConstraints = false
         coin.text = "¥"
-        coin.font = .systemFont(ofSize: 13, weight: .bold)
+        coin.font = LXCardSheet.anthro(13, semibold: true)
         coin.textAlignment = .center
         coin.layer.cornerRadius = 15
         coin.clipsToBounds = true
-        headL.font = .systemFont(ofSize: 15, weight: .semibold)
+        headL.font = LXCardSheet.anthro(15, semibold: true)
         headL.numberOfLines = 1
         headL.lineBreakMode = .byTruncatingTail
-        noteL.font = .systemFont(ofSize: 13)
+        noteL.font = LXCardSheet.anthro(13)
         noteL.numberOfLines = 0
         sCol.translatesAutoresizingMaskIntoConstraints = false
         sCol.axis = .vertical
@@ -3862,7 +3862,7 @@ final class LXFootCell: UITableViewCell {
     required init?(coder: NSCoder) { fatalError() }
     func configure(theme: LXChatTheme) {
         star.tintColor = theme.fnStar
-        let f = UIFont(name: "AnthropicSansWebVariable-TextRegular", size: 11.4) ?? UIFont.systemFont(ofSize: 11.4)
+        let f = UIFont(name: "AnthropicSansWebVariable-TextRegular", size: 11.4) ?? LXCardSheet.anthro(11.4)
         let ps = NSMutableParagraphStyle()
         ps.minimumLineHeight = 13.3; ps.maximumLineHeight = 13.3
         ps.alignment = .right

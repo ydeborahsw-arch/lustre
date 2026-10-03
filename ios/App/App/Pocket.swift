@@ -209,14 +209,14 @@ final class LXPocketSheet: UIViewController, UITextFieldDelegate {
         let nick = LXNick.yan
 
         toL.text = "To \(nick)"
-        toL.font = .systemFont(ofSize: 14)
+        toL.font = LXCardSheet.anthro(14)
         toL.textColor = LXPocketInk.textSoft
         toL.textAlignment = .center
 
         yenL.text = "¥"
-        yenL.font = .systemFont(ofSize: 26, weight: .semibold)
+        yenL.font = LXCardSheet.anthro(26, semibold: true)
         yenL.textColor = LXPocketInk.text
-        amountF.font = .systemFont(ofSize: 44, weight: .semibold)
+        amountF.font = LXCardSheet.anthro(44, semibold: true)
         amountF.textColor = LXPocketInk.text
         amountF.tintColor = LXPocketInk.star
         amountF.keyboardType = .decimalPad
@@ -229,7 +229,7 @@ final class LXPocketSheet: UIViewController, UITextFieldDelegate {
         // 白天面板底和输入框底几乎一样白:描一圈细线才看得出框
         noteBox.layer.borderWidth = RPSpec.moonState == "day" ? 1 : 0
         noteBox.layer.borderColor = LXPocketInk.line.cgColor
-        noteF.font = .systemFont(ofSize: 15)
+        noteF.font = LXCardSheet.anthro(15)
         noteF.textColor = LXPocketInk.text
         noteF.tintColor = LXPocketInk.star
         noteF.returnKeyType = .done
@@ -241,10 +241,10 @@ final class LXPocketSheet: UIViewController, UITextFieldDelegate {
         goBtn.layer.cornerRadius = 14
         goBtn.setTitle("Transfer", for: .normal)
         goBtn.setTitleColor(LXPocketInk.fg, for: .normal)
-        goBtn.titleLabel?.font = .systemFont(ofSize: 16, weight: .semibold)
+        goBtn.titleLabel?.font = LXCardSheet.anthro(16, semibold: true)
         goBtn.addAction(UIAction { [weak self] _ in self?.go() }, for: .touchUpInside)
 
-        hintL.font = .systemFont(ofSize: 12)
+        hintL.font = LXCardSheet.anthro(12)
         hintL.textColor = LXPocketInk.textFaint
         hintL.textAlignment = .center
         setHint(LXPocketNet.cachedBalance)
@@ -456,9 +456,9 @@ final class LXPocketVC: UIViewController {
         closeBtn.layer.borderColor = LXPocketInk.line.cgColor
         closeBtn.setImage(UIImage(systemName: "xmark", withConfiguration: UIImage.SymbolConfiguration(pointSize: 15, weight: .medium)), for: .normal)
         closeBtn.tintColor = LXPocketInk.textSoft
-        balLab.font = .systemFont(ofSize: 13)
+        balLab.font = LXCardSheet.anthro(13)
         balLab.textColor = LXPocketInk.textSoft
-        balNum.font = .systemFont(ofSize: 40, weight: .semibold)
+        balNum.font = LXCardSheet.anthro(40, semibold: true)
         balNum.textColor = LXPocketInk.text
         seg.backgroundColor = LXPocketInk.segBg
         seg.layer.cornerRadius = 10
@@ -466,9 +466,9 @@ final class LXPocketVC: UIViewController {
             v.backgroundColor = LXPocketInk.cardBg
             v.layer.cornerRadius = 14
         }
-        for l in [sum1L, sum2L] { l.font = .systemFont(ofSize: 12); l.textColor = LXPocketInk.textSoft; l.adjustsFontSizeToFitWidth = true; l.minimumScaleFactor = 0.8 }
-        for l in [sum1V, sum2V] { l.font = .systemFont(ofSize: 18, weight: .semibold); l.textColor = LXPocketInk.text }
-        emptyL.font = .systemFont(ofSize: 13)
+        for l in [sum1L, sum2L] { l.font = LXCardSheet.anthro(12); l.textColor = LXPocketInk.textSoft; l.adjustsFontSizeToFitWidth = true; l.minimumScaleFactor = 0.8 }
+        for l in [sum1V, sum2V] { l.font = LXCardSheet.anthro(18, semibold: true); l.textColor = LXPocketInk.text }
+        emptyL.font = LXCardSheet.anthro(13)
         emptyL.textColor = LXPocketInk.textFaint
     }
 
@@ -509,7 +509,7 @@ final class LXPocketVC: UIViewController {
             let on = b.tag == period.rawValue
             b.backgroundColor = on ? LXPocketInk.cardBg : .clear
             b.setTitleColor(on ? LXPocketInk.text : LXPocketInk.textSoft, for: .normal)
-            b.titleLabel?.font = .systemFont(ofSize: 14, weight: on ? .semibold : .regular)
+            b.titleLabel?.font = LXCardSheet.anthro(14, semibold: on)
         }
         let sl = slots()
         let inP = items.filter { $0.date >= sl.start && $0.date < sl.end }
@@ -542,7 +542,7 @@ final class LXPocketVC: UIViewController {
                 col.addSubview(v)
             }
             lab.text = sl.labels[i]
-            lab.font = .systemFont(ofSize: 10)
+            lab.font = LXCardSheet.anthro(10)
             lab.textColor = LXPocketInk.textFaint
             lab.textAlignment = .center
             col.addSubview(lab)
@@ -551,10 +551,10 @@ final class LXPocketVC: UIViewController {
         // 图例:小方块 + 字
         let lg = NSMutableAttributedString()
         let sq: (UIColor) -> NSAttributedString = { c in
-            NSAttributedString(string: "■ ", attributes: [.foregroundColor: c, .font: UIFont.systemFont(ofSize: 9)])
+            NSAttributedString(string: "■ ", attributes: [.foregroundColor: c, .font: LXCardSheet.anthro(9)])
         }
         let tx: (String) -> NSAttributedString = { s in
-            NSAttributedString(string: s, attributes: [.foregroundColor: LXPocketInk.textSoft, .font: UIFont.systemFont(ofSize: 11)])
+            NSAttributedString(string: s, attributes: [.foregroundColor: LXPocketInk.textSoft, .font: LXCardSheet.anthro(11)])
         }
         lg.append(sq(LXPocketInk.star)); lg.append(tx("You gave \(nick)      "))
         lg.append(sq(LXPocketInk.textFaint.withAlphaComponent(0.55))); lg.append(tx("\(nick) spent / sent you"))
@@ -569,7 +569,7 @@ final class LXPocketVC: UIViewController {
                 lastDay = day
                 let h = UILabel()
                 h.text = day
-                h.font = .systemFont(ofSize: 12)
+                h.font = LXCardSheet.anthro(12)
                 h.textColor = LXPocketInk.textFaint
                 h.tag = 1
                 recs.addSubview(h)
@@ -585,7 +585,7 @@ final class LXPocketVC: UIViewController {
         row.tag = 2
         let k = UILabel()
         k.text = it.type == "spend" ? "¥" : "⇄"
-        k.font = .systemFont(ofSize: 13, weight: .semibold)
+        k.font = LXCardSheet.anthro(13, semibold: true)
         k.textAlignment = .center
         k.textColor = LXPocketInk.text
         k.backgroundColor = LXPocketInk.cardBg
@@ -597,16 +597,16 @@ final class LXPocketVC: UIViewController {
         case "back": r1.text = "From \(nick)" + (it.note.isEmpty ? "" : " · \(it.note)")
         default: r1.text = it.note.isEmpty ? "\(nick) spent" : it.note
         }
-        r1.font = .systemFont(ofSize: 15)
+        r1.font = LXCardSheet.anthro(15)
         r1.textColor = LXPocketInk.text
         r1.lineBreakMode = .byTruncatingTail
         let pend = it.status == "pending"
         let time = LXPocketCal.fmt(it.date, "HH:mm")
         r2.text = pend ? (it.type == "give" ? "\(time) · Pending" : "\(time) · Waiting for you") : time
-        r2.font = .systemFont(ofSize: 12)
+        r2.font = LXCardSheet.anthro(12)
         r2.textColor = LXPocketInk.textFaint
         m.text = (it.type == "give" ? "+" : "−") + LXPocketInfo.plain(it.amt)
-        m.font = .systemFont(ofSize: 15, weight: .semibold)
+        m.font = LXCardSheet.anthro(15, semibold: true)
         m.textColor = it.type == "give" && !pend ? LXPocketInk.text : LXPocketInk.textSoft
         m.textAlignment = .right
         let sep = UIView()
