@@ -145,7 +145,7 @@ enum LXPocketCal {
         let f = DateFormatter()
         f.calendar = cal
         f.timeZone = cal.timeZone
-        f.locale = Locale(identifier: "zh_CN")
+        f.locale = Locale(identifier: "en_US_POSIX")
         f.dateFormat = pattern
         return f.string(from: d)
     }
@@ -190,7 +190,7 @@ final class LXPocketSheet: UIViewController, UITextFieldDelegate {
         view.backgroundColor = LXPocketInk.cardBg
         let nick = LXNick.yan
 
-        toL.text = "转给 \(nick)"
+        toL.text = "To \(nick)"
         toL.font = .systemFont(ofSize: 14)
         toL.textColor = LXPocketInk.textSoft
         toL.textAlignment = .center
@@ -213,12 +213,12 @@ final class LXPocketSheet: UIViewController, UITextFieldDelegate {
         noteF.tintColor = LXPocketInk.star
         noteF.returnKeyType = .done
         noteF.delegate = self
-        noteF.attributedPlaceholder = NSAttributedString(string: "备注（选填）", attributes: [.foregroundColor: LXPocketInk.textSoft])
+        noteF.attributedPlaceholder = NSAttributedString(string: "Add a note (optional)", attributes: [.foregroundColor: LXPocketInk.textSoft])
         noteBox.addSubview(noteF)
 
         goBtn.backgroundColor = LXPocketInk.star
         goBtn.layer.cornerRadius = 14
-        goBtn.setTitle("转账", for: .normal)
+        goBtn.setTitle("Transfer", for: .normal)
         goBtn.setTitleColor(LXPocketInk.fg, for: .normal)
         goBtn.titleLabel?.font = .systemFont(ofSize: 16, weight: .semibold)
         goBtn.addAction(UIAction { [weak self] _ in self?.go() }, for: .touchUpInside)
@@ -236,7 +236,7 @@ final class LXPocketSheet: UIViewController, UITextFieldDelegate {
     private func setHint(_ bal: Int?) {
         guard !sending else { return }
         hintL.textColor = LXPocketInk.textFaint
-        hintL.text = bal.map { "\(LXNick.yan) 现在的零花钱 \(LXPocketInfo.yuan($0))" } ?? " "
+        hintL.text = bal.map { "\(LXNick.yan)'s pocket money: \(LXPocketInfo.yuan($0))" } ?? " "
     }
 
     override func viewDidAppear(_ animated: Bool) {
@@ -314,7 +314,7 @@ final class LXPocketSheet: UIViewController, UITextFieldDelegate {
             } else {
                 UINotificationFeedbackGenerator().notificationOccurred(.error)
                 self.hintL.textColor = LXPocketInk.textSoft
-                self.hintL.text = "没发出去，再点一次"
+                self.hintL.text = "Didn't go through. Tap again."
                 self.amountChanged()
             }
         }
@@ -392,7 +392,7 @@ final class LXPocketVC: UIViewController {
         scroll.alwaysBounceVertical = true
         scroll.contentInsetAdjustmentBehavior = .never
         [balLab, balNum, seg, sum1, sum2, bars, legend, recs, emptyL].forEach { scroll.addSubview($0) }
-        for (i, t) in ["周", "月", "年"].enumerated() {
+        for (i, t) in ["Week", "Month", "Year"].enumerated() {
             let b = UIButton(type: .custom)
             b.setTitle(t, for: .normal)
             b.layer.cornerRadius = 8
@@ -445,7 +445,7 @@ final class LXPocketVC: UIViewController {
             v.backgroundColor = LXPocketInk.cardBg
             v.layer.cornerRadius = 14
         }
-        for l in [sum1L, sum2L] { l.font = .systemFont(ofSize: 12); l.textColor = LXPocketInk.textSoft }
+        for l in [sum1L, sum2L] { l.font = .systemFont(ofSize: 12); l.textColor = LXPocketInk.textSoft; l.adjustsFontSizeToFitWidth = true; l.minimumScaleFactor = 0.8 }
         for l in [sum1V, sum2V] { l.font = .systemFont(ofSize: 18, weight: .semibold); l.textColor = LXPocketInk.text }
         emptyL.font = .systemFont(ofSize: 13)
         emptyL.textColor = LXPocketInk.textFaint
@@ -460,7 +460,7 @@ final class LXPocketVC: UIViewController {
         case .week:
             let s = c.dateInterval(of: .weekOfYear, for: now)?.start ?? now
             let edges = (0...7).compactMap { c.date(byAdding: .day, value: $0, to: s) }
-            return (s, edges.last ?? now, edges, ["一", "二", "三", "四", "五", "六", "日"])
+            return (s, edges.last ?? now, edges, ["M", "T", "W", "T", "F", "S", "S"])
         case .month:
             let mi = c.dateInterval(of: .month, for: now)
             let s = mi?.start ?? now, e = mi?.end ?? now
@@ -469,7 +469,7 @@ final class LXPocketVC: UIViewController {
             var d = c.dateInterval(of: .weekOfYear, for: s)?.end ?? e
             while d < e { edges.append(d); d = c.date(byAdding: .day, value: 7, to: d) ?? e }
             edges.append(e)
-            let labels = (0..<(edges.count - 1)).map { "\($0 + 1)周" }
+            let labels = (0..<(edges.count - 1)).map { "W\($0 + 1)" }
             return (s, e, edges, labels)
         case .year:
             let yi = c.dateInterval(of: .year, for: now)
@@ -482,7 +482,7 @@ final class LXPocketVC: UIViewController {
     private func render() {
         guard isViewLoaded else { return }
         let nick = LXNick.yan
-        balLab.text = "\(nick) 的余额"
+        balLab.text = "\(nick)'s balance"
         balNum.text = LXPocketInfo.yuan(balance)
         for b in segBtns {
             let on = b.tag == period.rawValue
@@ -492,9 +492,9 @@ final class LXPocketVC: UIViewController {
         }
         let sl = slots()
         let inP = items.filter { $0.date >= sl.start && $0.date < sl.end }
-        let word = ["这周", "这个月", "今年"][period.rawValue]
-        sum1L.text = "\(word)你给 \(nick)"
-        sum2L.text = "\(word) \(nick) 花掉"
+        let word = ["this week", "this month", "this year"][period.rawValue]
+        sum1L.text = "You gave \(nick) \(word)"
+        sum2L.text = "\(nick) spent \(word)"
         sum1V.text = LXPocketInfo.yuan(inP.filter { $0.isIn }.reduce(0) { $0 + $1.amt })
         sum2V.text = LXPocketInfo.yuan(inP.filter { $0.isOut }.reduce(0) { $0 + $1.amt })
 
@@ -535,15 +535,15 @@ final class LXPocketVC: UIViewController {
         let tx: (String) -> NSAttributedString = { s in
             NSAttributedString(string: s, attributes: [.foregroundColor: LXPocketInk.textSoft, .font: UIFont.systemFont(ofSize: 11)])
         }
-        lg.append(sq(LXPocketInk.star)); lg.append(tx("你给 \(nick)      "))
-        lg.append(sq(LXPocketInk.textFaint.withAlphaComponent(0.55))); lg.append(tx("\(nick) 花掉 / 转给你"))
+        lg.append(sq(LXPocketInk.star)); lg.append(tx("You gave \(nick)      "))
+        lg.append(sq(LXPocketInk.textFaint.withAlphaComponent(0.55))); lg.append(tx("\(nick) spent / sent you"))
         legend.attributedText = lg
 
         // 流水:按天分组
         recs.subviews.forEach { $0.removeFromSuperview() }
         var lastDay = ""
         for it in inP {
-            let day = LXPocketCal.fmt(it.date, "M月d日 EEE")
+            let day = LXPocketCal.fmt(it.date, "EEE, MMM d")
             if day != lastDay {
                 lastDay = day
                 let h = UILabel()
@@ -555,7 +555,7 @@ final class LXPocketVC: UIViewController {
             }
             recs.addSubview(recRow(it, nick: nick))
         }
-        emptyL.text = inP.isEmpty ? "\(word)还没有记录" : nil
+        emptyL.text = inP.isEmpty ? "Nothing \(word) yet" : nil
         view.setNeedsLayout()
     }
 
@@ -572,16 +572,16 @@ final class LXPocketVC: UIViewController {
         k.layer.masksToBounds = true
         let r1 = UILabel(), r2 = UILabel(), m = UILabel()
         switch it.type {
-        case "give": r1.text = "你转给 \(nick)" + (it.note.isEmpty ? "" : " · \(it.note)")
-        case "back": r1.text = "\(nick) 转给你" + (it.note.isEmpty ? "" : " · \(it.note)")
-        default: r1.text = it.note.isEmpty ? "\(nick) 花了一笔" : it.note
+        case "give": r1.text = "To \(nick)" + (it.note.isEmpty ? "" : " · \(it.note)")
+        case "back": r1.text = "From \(nick)" + (it.note.isEmpty ? "" : " · \(it.note)")
+        default: r1.text = it.note.isEmpty ? "\(nick) spent" : it.note
         }
         r1.font = .systemFont(ofSize: 15)
         r1.textColor = LXPocketInk.text
         r1.lineBreakMode = .byTruncatingTail
         let pend = it.status == "pending"
         let time = LXPocketCal.fmt(it.date, "HH:mm")
-        r2.text = pend ? (it.type == "give" ? "\(time) · 待收款" : "\(time) · 等你收") : time
+        r2.text = pend ? (it.type == "give" ? "\(time) · Pending" : "\(time) · Waiting for you") : time
         r2.font = .systemFont(ofSize: 12)
         r2.textColor = LXPocketInk.textFaint
         m.text = (it.type == "give" ? "+" : "−") + LXPocketInfo.plain(it.amt)

@@ -587,12 +587,12 @@ final class LXChatData {
             return m
         }
         let demo: [LXMsg] = [
-            one(1, "human", "transfer", "转账 ¥52.00 · 零花钱，拿去花", pk(9001, 5200, "零花钱，拿去花", "give", "send", "done"), 300),
-            one(2, "ai", "transfer", "已收款 ¥52.00", pk(9001, 5200, "零花钱，拿去花", "give", "receipt", "done"), 290),
+            one(1, "human", "transfer", "Transfer ¥52.00 · 零花钱，拿去花", pk(9001, 5200, "零花钱，拿去花", "give", "send", "done"), 300),
+            one(2, "ai", "transfer", "Received ¥52.00", pk(9001, 5200, "零花钱，拿去花", "give", "receipt", "done"), 290),
             one(3, "ai", "reply", "收到啦，先存着", nil, 280),
-            one(4, "ai", "spend", "花了 ¥18.00 · 给你点了一杯热可可", pk(9002, 1800, "给你点了一杯热可可", "", "", ""), 270),
-            one(5, "ai", "transfer", "转账 ¥20.00 · 请你吃早饭", pk(9003, 2000, "请你吃早饭", "back", "send", "pending"), 260),
-            one(6, "human", "transfer", "转账 ¥5.20", pk(9004, 520, "", "give", "send", "pending"), 250),
+            one(4, "ai", "spend", "Spent ¥18.00 · 给你点了一杯热可可", pk(9002, 1800, "给你点了一杯热可可", "", "", ""), 270),
+            one(5, "ai", "transfer", "Transfer ¥20.00 · 请你吃早饭", pk(9003, 2000, "请你吃早饭", "back", "send", "pending"), 260),
+            one(6, "human", "transfer", "Transfer ¥5.20", pk(9004, 520, "", "give", "send", "pending"), 250),
         ]
         pocketDemoIds = Set(demo.map { $0.id })
         merge(demo)
@@ -603,7 +603,7 @@ final class LXChatData {
         guard LustreConfig.isPreview, let m = idx[id], let p = m.pocket, p.pending else { return }
         var done = m
         done.pocket = LXPocketInfo(tid: p.tid, amt: p.amt, note: p.note, dir: p.dir, role: p.role, status: "done")
-        var r = LXMsg(id: m.id + 100000, from: "human", kind: "transfer", text: "已收款 " + LXPocketInfo.yuan(p.amt),
+        var r = LXMsg(id: m.id + 100000, from: "human", kind: "transfer", text: "Received " + LXPocketInfo.yuan(p.amt),
                       ts: Date(), session: m.session, attCount: 0)
         r.pocket = LXPocketInfo(tid: p.tid, amt: p.amt, note: p.note, dir: "back", role: "receipt", status: "done")
         if Self.pocketPreview { pocketDemoIds.insert(r.id) }
@@ -3781,7 +3781,7 @@ final class LXPocketCell: UITableViewCell {
             coin.textColor = LXPocketInk.fg
             // 卡有自己的底,字用卡的墨(theme.aiFg 会跟壁纸变,放卡上可能看不见)
             headL.textColor = LXSheetInk.text
-            headL.text = "\(LXNick.yan) 花了 \(LXPocketInfo.yuan(p.amt))"
+            headL.text = "\(LXNick.yan) spent \(LXPocketInfo.yuan(p.amt))"
             noteL.textColor = LXSheetInk.soft
             noteL.text = p.note
             noteL.isHidden = p.note.isEmpty
@@ -3811,13 +3811,13 @@ final class LXPocketCell: UITableViewCell {
             amtL.textColor = fg
             amtL.text = LXPocketInfo.yuan(p.amt)
             stateL.textColor = soft
-            stateL.text = p.pending ? "待收款" : nil
+            stateL.text = p.pending ? "Pending" : nil
             stateL.isHidden = !p.pending
             subL.textColor = soft
-            if p.taken { subL.text = "已被接收" }
-            else if p.role == "receipt" { subL.text = "已收款" }
+            if p.taken { subL.text = "Accepted" }
+            else if p.role == "receipt" { subL.text = "Received" }
             else if !p.note.isEmpty { subL.text = p.note }
-            else { subL.text = mine ? "转账给\(LXNick.yan)" : "转账给你" }
+            else { subL.text = mine ? "To \(LXNick.yan)" : "To you" }
             wC.constant = min(240, maxW)
             hC.constant = 68
             // 只有他转给她、还没收的那张能点
