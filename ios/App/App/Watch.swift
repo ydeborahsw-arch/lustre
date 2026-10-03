@@ -837,7 +837,10 @@ final class LXWatchVC: UIViewController, WKScriptMessageHandler, WKNavigationDel
     func webView(_ w: WKWebView, decidePolicyFor a: WKNavigationAction, decisionHandler: @escaping @MainActor @Sendable (WKNavigationActionPolicy) -> Void) {
         // 网页里"打开 App"之类的跳转不放行,留在这里看
         let s = a.request.url?.scheme?.lowercased() ?? ""
-        decisionHandler(["http", "https", "about", "blob", "data"].contains(s) ? .allow : .cancel)
+        guard ["http", "https", "about", "blob", "data"].contains(s) else { decisionHandler(.cancel); return }
+        // 1003 她:一点播放就跳进了 B 站 App——B 站的 https 链接是"通用链接",手机装了 B 站就会被系统直接拉过去。
+        // WebKit 有一档"放行,但不试着开 App"(值 = allow + 2),用它就一直留在我们这页里
+        decisionHandler(WKNavigationActionPolicy(rawValue: WKNavigationActionPolicy.allow.rawValue + 2) ?? .allow)
     }
 
     func webView(_ w: WKWebView, createWebViewWith c: WKWebViewConfiguration, for a: WKNavigationAction,
