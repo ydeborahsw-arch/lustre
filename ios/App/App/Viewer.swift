@@ -143,7 +143,10 @@ final class LXFilePreview: NSObject, QLPreviewControllerDataSource {
     private var local: URL?
 
     func open(url: URL, name: String) {
+        // 按每张卡自己的上传地址分开存:同名的新卡不会再打开成上一张的旧文件
+        let key = url.lastPathComponent.isEmpty ? "file" : url.lastPathComponent
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent("lx-preview", isDirectory: true)
+            .appendingPathComponent(key, isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let safe = name.isEmpty ? "file" : name.replacingOccurrences(of: "/", with: "_")
         let dst = dir.appendingPathComponent(safe)
