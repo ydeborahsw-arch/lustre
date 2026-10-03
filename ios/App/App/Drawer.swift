@@ -300,7 +300,7 @@ struct LXDrawerSpec {
                 return (menu: m, name: (r["name"] as? String) ?? m)
             }
         }
-        if LustreConfig.webless { s.items = s.items.filter { nativeMenus.contains($0.menu) } }
+        if LustreConfig.webless { s.items = withNative(s.items) }
         if let arr = d["sessions"] as? [[String: Any]] {
             s.sessions = arr.compactMap { (r: [String: Any]) -> (sid: String, title: String, active: Bool, pinned: Bool, cat: String)? in
                 guard let id = r["sid"] as? String else { return nil }
@@ -318,8 +318,22 @@ struct LXDrawerSpec {
         if let data = UserDefaults.standard.data(forKey: key),
            let d = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] { return from(d) }
         var s = LXDrawerSpec()
-        if LustreConfig.webless { s.items = s.items.filter { nativeMenus.contains($0.menu) } }
+        if LustreConfig.webless { s.items = withNative(s.items) }
         return s
+    }
+    /// 只留原生能开的项;网页时代存下的单子里没有后来加的原生项(1003 的 Watch、Pocket 就是这样没出来),
+    /// 按默认顺序补进去:插在默认单子里它前一项的后面
+    static func withNative(_ items: [(menu: String, name: String)]) -> [(menu: String, name: String)] {
+        var out = items.filter { nativeMenus.contains($0.menu) }
+        let defaults = LXDrawerSpec().items
+        for (i, it) in defaults.enumerated() where nativeMenus.contains(it.menu) && !out.contains(where: { $0.menu == it.menu }) {
+            var at = out.count
+            for p in defaults[..<i].reversed() {
+                if let j = out.firstIndex(where: { $0.menu == p.menu }) { at = j + 1; break }
+            }
+            out.insert(it, at: at)
+        }
+        return out
     }
     static func daysSince(_ since: String) -> Int? {
         let parts = since.split(whereSeparator: { $0 == "/" || $0 == "-" || $0 == "." }).compactMap { Int($0) }
