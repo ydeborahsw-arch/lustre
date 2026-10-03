@@ -731,9 +731,10 @@ enum LXPocketPreview {
         var sheet: LXPocketSheet?
         let steps: [(UIColor, () -> Void)] = [
             (.yellow, { }),                                                                   // 聊天里的卡(月夜)
-            (.cyan, {                                                                         // 点他转来的那张收下 + 开头像模式
-                ChatListPlugin.live?.previewAcceptPocket()
+            (.cyan, {                                                                         // 点他转来的那张:确认卡 → 8 秒后点 Receive;开头像模式
                 ChatListPlugin.live?.rpToggleAvatars()
+                ChatListPlugin.live?.previewAcceptPocket()
+                DispatchQueue.main.asyncAfter(deadline: .now() + 8) { LXPocketAccept.previewConfirm() }
             }),
             (.red, { ChatListPlugin.live?.switchMoon("half") }),                              // 半月:橙底白字
             (UIColor(red: 0.5, green: 0, blue: 1, alpha: 1), {                                // 白天 + 加号面板三格
@@ -771,5 +772,65 @@ enum LXPocketPreview {
                 }
             }
         }
+    }
+}
+
+// MARK: - 他转来的卡点一下:先升起一张确认卡,点 Receive 才收(她 1003:只管他转给她的;她转他的他在终端里直接收)
+
+enum LXPocketAccept {
+    private static weak var current: LXCardSheet?
+    private static var pending: (() -> Void)?
+
+    static func confirm(amt: Int, note: String, onReceive: @escaping () -> Void) {
+        guard current == nil, let host = DrawerPlugin.topVC()?.view else { return }
+        pending = onReceive
+        let sheet = LXCardSheet(host: host, title: "Transfer", onDismiss: { LXPocketAccept.pending = nil }) { sh in
+            let from = UILabel()
+            from.text = "From \(LXNick.yan)"
+            from.font = LXCardSheet.anthro(14)
+            from.textColor = LXSheetInk.soft
+            from.textAlignment = .center
+            let amtL = UILabel()
+            amtL.text = LXPocketInfo.yuan(amt)
+            amtL.font = LXCardSheet.anthro(40, semibold: true)
+            amtL.textColor = LXSheetInk.text
+            amtL.textAlignment = .center
+            sh.content.addArrangedSubview(from)
+            sh.content.addArrangedSubview(amtL)
+            if !note.isEmpty {
+                let n = UILabel()
+                n.text = note
+                n.font = LXCardSheet.anthro(14)
+                n.textColor = LXSheetInk.soft
+                n.textAlignment = .center
+                n.numberOfLines = 2
+                sh.content.addArrangedSubview(n)
+            }
+            let go = UIButton(type: .custom)
+            go.backgroundColor = LXPocketInk.star
+            go.layer.cornerRadius = 14
+            go.setTitle("Receive", for: .normal)
+            go.setTitleColor(LXPocketInk.fg, for: .normal)
+            go.titleLabel?.font = LXCardSheet.anthro(16, semibold: true)
+            go.heightAnchor.constraint(equalToConstant: 48).isActive = true
+            go.addAction(UIAction { _ in LXPocketAccept.receive() }, for: .touchUpInside)
+            sh.content.setCustomSpacing(18, after: sh.content.arrangedSubviews.last ?? amtL)
+            sh.content.addArrangedSubview(go)
+        }
+        current = sheet
+    }
+
+    private static func receive() {
+        let f = pending
+        pending = nil
+        UINotificationFeedbackGenerator().notificationOccurred(.success)
+        current?.dismissSheet()
+        f?()
+    }
+
+    /// 预览脚本用:等于在确认卡上点了 Receive
+    static func previewConfirm() {
+        guard LustreConfig.isPreview else { return }
+        receive()
     }
 }

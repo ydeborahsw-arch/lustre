@@ -7589,11 +7589,16 @@ public class ChatListPlugin: CAPPlugin, CAPBridgedPlugin, UITableViewDataSource,
         guard !multiOn, m.kind == "transfer", m.from == "ai", let p = m.pocket, p.dir == "back", p.pending,
               !pocketBusy.contains(p.tid) else { return }
         UIImpactFeedbackGenerator(style: .light).impactOccurred()
-        if LustreConfig.isPreview { data.previewAcceptPocket(m.id); return }
-        pocketBusy.insert(p.tid)
-        LXPocketNet.accept(tid: p.tid) { [weak self] ok in
-            self?.pocketBusy.remove(p.tid)
-            if !ok { UINotificationFeedbackGenerator().notificationOccurred(.error) }
+        // 1003 她:点一下先弹确认卡,点 Receive 才收
+        LXPocketAccept.confirm(amt: p.amt, note: p.note) { [weak self] in
+            guard let self = self else { return }
+            if LustreConfig.isPreview { self.data.previewAcceptPocket(m.id); return }
+            guard !self.pocketBusy.contains(p.tid) else { return }
+            self.pocketBusy.insert(p.tid)
+            LXPocketNet.accept(tid: p.tid) { [weak self] ok in
+                self?.pocketBusy.remove(p.tid)
+                if !ok { UINotificationFeedbackGenerator().notificationOccurred(.error) }
+            }
         }
     }
 
