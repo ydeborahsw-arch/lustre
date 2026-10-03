@@ -322,9 +322,25 @@ struct LXDrawerSpec {
         return s
     }
     /// 全原生的 App 只认自己这张单子。手机里存着的 items 是以前网页那层报上来的旧单子,
-    /// 后来加的项(1003 的 Watch、Pocket)都不在上面——不再读它
+    /// 后来加的项(1003 的 Watch、Pocket)都不在上面——不再读它。
+    /// 顺序:她长按拖过就按她拖的(orderKey);单子里以后新加的项插在默认顺序里它前一项的后面
+    static let orderKey = "lx.drawer.order"
     static func withNative(_ items: [(menu: String, name: String)]) -> [(menu: String, name: String)] {
-        LXDrawerSpec().items.filter { nativeMenus.contains($0.menu) }
+        let base = LXDrawerSpec().items.filter { nativeMenus.contains($0.menu) }
+        guard let saved = UserDefaults.standard.stringArray(forKey: orderKey), !saved.isEmpty else { return base }
+        var out = saved.compactMap { m in base.first { $0.menu == m } }
+        for (i, it) in base.enumerated() where !out.contains(where: { $0.menu == it.menu }) {
+            var at = 0
+            for p in base[..<i].reversed() {
+                if let j = out.firstIndex(where: { $0.menu == p.menu }) { at = j + 1; break }
+            }
+            out.insert(it, at: at)
+        }
+        return out
+    }
+    /// 按给的顺序重排(拖完马上用,不等下次打开)
+    mutating func reorder(_ order: [String]) {
+        items.sort { (order.firstIndex(of: $0.menu) ?? Int.max) < (order.firstIndex(of: $1.menu) ?? Int.max) }
     }
     static func daysSince(_ since: String) -> Int? {
         let parts = since.split(whereSeparator: { $0 == "/" || $0 == "-" || $0 == "." }).compactMap { Int($0) }
@@ -518,6 +534,7 @@ enum LXSessionsAPI {
 
 final class LXDrawerItem: UIControl {
     let nameL = UILabel()
+    var menu = ""
     private let iconV = UIImageView()
     init(icon: UIImage, name: String, tint: LXDrawerTint) {
         super.init(frame: .zero)
@@ -1065,10 +1082,16 @@ final class LXDrawerView: UIView {
         for it in spec.items {
             let row = LXDrawerItem(icon: LXDrawerIcons.menuIcon(it.menu), name: it.name, tint: tint)
             let key = it.menu
+            row.menu = key
             row.addAction(UIAction { [weak self] _ in self?.onAct?("menu", key) }, for: .touchUpInside)
+            // 1003 她:长按拖动换顺序
+            let lp = UILongPressGestureRecognizer(target: self, action: #selector(itemDrag(_:)))
+            lp.minimumPressDuration = 0.4
+            row.addGestureRecognizer(lp)
             items.addArrangedSubview(row)
             if firstItem == nil { firstItem = row }
         }
+        itemStack = items
         list.addSubview(line); list.addSubview(items)
         NSLayoutConstraint.activate([
             line.topAnchor.constraint(equalTo: list.topAnchor),
@@ -1119,6 +1142,73 @@ final class LXDrawerView: UIView {
             rows.bottomAnchor.constraint(equalTo: sec.bottomAnchor),
         ])
         return sec
+    }
+
+    // MARK: 长按拖动换顺序:原行留空位,一张快照跟手;越过邻居中线就换位,松手存顺序
+
+    private weak var itemStack: UIStackView?
+    private var dragSnap: UIView?
+    private weak var dragRow: LXDrawerItem?
+
+    @objc private func itemDrag(_ g: UILongPressGestureRecognizer) {
+        guard let row = g.view as? LXDrawerItem, let st = itemStack else { return }
+        switch g.state {
+        case .began:
+            guard dragRow == nil else { return }
+            dragRow = row
+            scroll.isScrollEnabled = false
+            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+            row.backgroundColor = tint.cardBg
+            guard let snap = row.snapshotView(afterScreenUpdates: true) else { row.backgroundColor = .clear; dragRow = nil; return }
+            row.backgroundColor = .clear
+            snap.frame = row.convert(row.bounds, to: self)
+            snap.layer.cornerRadius = 10
+            snap.layer.shadowColor = tint.shadow.cgColor
+            snap.layer.shadowOpacity = 0.18
+            snap.layer.shadowRadius = 10
+            snap.layer.shadowOffset = CGSize(width: 0, height: 4)
+            addSubview(snap)
+            dragSnap = snap
+            row.alpha = 0
+            UIView.animate(withDuration: 0.18) { snap.transform = CGAffineTransform(scaleX: 1.03, y: 1.03) }
+        case .changed:
+            guard dragRow === row, let snap = dragSnap else { return }
+            snap.center.y = g.location(in: self).y
+            let y = g.location(in: st).y
+            let rows = st.arrangedSubviews
+            guard let idx = rows.firstIndex(of: row) else { return }
+            var to = idx
+            if idx > 0, y < rows[idx - 1].frame.midY { to = idx - 1 }
+            else if idx < rows.count - 1, y > rows[idx + 1].frame.midY { to = idx + 1 }
+            if to != idx {
+                st.removeArrangedSubview(row)
+                st.insertArrangedSubview(row, at: to)
+                UISelectionFeedbackGenerator().selectionChanged()
+                UIView.animate(withDuration: 0.2) { st.layoutIfNeeded() }
+            }
+        case .ended, .cancelled, .failed:
+            guard dragRow === row else { return }
+            let snap = dragSnap
+            dragSnap = nil
+            dragRow = nil
+            scroll.isScrollEnabled = true
+            // 拖的过程中抽屉要是整个重建过,这一行已经不在了:只收拾,不存
+            if row.superview === st {
+                let order = st.arrangedSubviews.compactMap { ($0 as? LXDrawerItem)?.menu }
+                UserDefaults.standard.set(order, forKey: LXDrawerSpec.orderKey)
+                spec.reorder(order)
+                LXDrawer.spec.reorder(order)
+            }
+            UIView.animate(withDuration: 0.2, animations: {
+                snap?.transform = .identity
+                snap?.frame = row.convert(row.bounds, to: self)
+            }, completion: { _ in
+                row.alpha = 1
+                snap?.removeFromSuperview()
+            })
+        default:
+            break
+        }
     }
 
     @objc private func rowLongPress(_ g: UILongPressGestureRecognizer) {
