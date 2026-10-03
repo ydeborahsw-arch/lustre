@@ -564,6 +564,7 @@ final class LXChatData {
             if LustreConfig.previewFocus == "composer" { ChatListPlugin.live?.previewComposerTour() }
             else if LustreConfig.previewFocus == "bubbles" { ChatListPlugin.live?.previewBubbleSampler() }
             else if LustreConfig.previewFocus == "coread" { LXCRPreview.start() }
+            else if LustreConfig.previewFocus == "watch" { LXWatchPreview.start() }
             else { ChatListPlugin.live?.previewAvaTimeCheck() }
         }
         let base = (msgs.last?.id ?? 0) + 1000
@@ -1179,6 +1180,7 @@ final class LXChatData {
 
     func handle(_ obj: [String: Any]) {
         if LXCallSession.shared.isActive { LXCallSession.shared.feed(obj) }
+        LXWatchVC.feed(obj)     // 1003 共看:页面开着时他的回复飘成弹幕
         if obj["type"] == nil, obj["id"] is NSNumber, obj["from"] is String {
             guard let m = Self.parse(obj) else { return }
             // 1001 别的线来的:不进这页,只给侧边栏记一笔没看的

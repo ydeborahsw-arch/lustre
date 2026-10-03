@@ -24,6 +24,7 @@
 		AA11BEEF00000000000C0C52 /* Outbox.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA11BEEF00000000000C0FE7 /* Outbox.swift */; };
 		AA11BEEF00000000000C0C53 /* Viewer.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA11BEEF00000000000C0FE8 /* Viewer.swift */; };
 		AA11BEEF00000000000C0C54 /* CoRead.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA11BEEF00000000000C0FE9 /* CoRead.swift */; };
+		AA11BEEF00000000000C0C55 /* Watch.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA11BEEF00000000000C0FEA /* Watch.swift */; };
 		AA11BEEF00000000000ABF0C /* LustreExtras.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA11BEEF00000000000AFE0C /* LustreExtras.swift */; };
 		AA11BEEF00000000000ABF0B /* PickerPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA11BEEF00000000000AFE0B /* PickerPlugin.swift */; };
 		AA11BEEF000000000000BF02 /* MyViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA11BEEF000000000000FE03 /* MyViewController.swift */; };
@@ -94,6 +95,7 @@
 		AA11BEEF00000000000C0FE7 /* Outbox.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Outbox.swift; sourceTree = "<group>"; };
 		AA11BEEF00000000000C0FE8 /* Viewer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Viewer.swift; sourceTree = "<group>"; };
 		AA11BEEF00000000000C0FE9 /* CoRead.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoRead.swift; sourceTree = "<group>"; };
+		AA11BEEF00000000000C0FEA /* Watch.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Watch.swift; sourceTree = "<group>"; };
 		AA11BEEF00000000000AFE0C /* LustreExtras.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LustreExtras.swift; sourceTree = "<group>"; };
 		AA11BEEF00000000000AFE0B /* PickerPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PickerPlugin.swift; sourceTree = "<group>"; };
 		AA11BEEF000000000000FE03 /* MyViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MyViewController.swift; sourceTree = "<group>"; };
@@ -186,6 +188,7 @@
 				AA11BEEF00000000000C0FE7 /* Outbox.swift */,
 				AA11BEEF00000000000C0FE8 /* Viewer.swift */,
 				AA11BEEF00000000000C0FE9 /* CoRead.swift */,
+				AA11BEEF00000000000C0FEA /* Watch.swift */,
 				AA11BEEF00000000000AFE2F /* footstar.png */,
 				AA11BEEF00000000000AFE0C /* LustreExtras.swift */,
 				AA11BEEF00000000000AFE0B /* PickerPlugin.swift */,
@@ -372,6 +375,7 @@
 				AA11BEEF00000000000C0C52 /* Outbox.swift in Sources */,
 				AA11BEEF00000000000C0C53 /* Viewer.swift in Sources */,
 				AA11BEEF00000000000C0C54 /* CoRead.swift in Sources */,
+				AA11BEEF00000000000C0C55 /* Watch.swift in Sources */,
 				AA11BEEF00000000000ABF0C /* LustreExtras.swift in Sources */,
 				AA11BEEF00000000000ABF0B /* PickerPlugin.swift in Sources */,
 				AA11BEEF000000000000BF02 /* MyViewController.swift in Sources */,
