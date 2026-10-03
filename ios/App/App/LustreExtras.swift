@@ -2522,8 +2522,8 @@ public class NativeInputPlugin: CAPPlugin, CAPBridgedPlugin, UITextViewDelegate 
             col.alignment = .center
             col.spacing = 8
             col.isUserInteractionEnabled = false
-            let iv = UIImageView(image: UIImage(systemName: icon,
-                withConfiguration: UIImage.SymbolConfiguration(pointSize: 22, weight: .light)))
+            let iv = UIImageView(image: id == "transfer" ? (LXPocketInk.swapIcon(size: 26) as UIImage?)
+                : UIImage(systemName: icon, withConfiguration: UIImage.SymbolConfiguration(pointSize: 22, weight: .light)))
             iv.tintColor = LXSheetInk.text
             let tl = UILabel()
             tl.text = title

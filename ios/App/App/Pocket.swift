@@ -48,6 +48,24 @@ enum LXPocketInk {
     static var soft: UIColor { m == "half" ? hex(0xFFFFFF, 0.78) : m == "day" ? hex(0x000000, 0.6) : hex(0x05070B, 0.62) }
     /// 被收下以后整张卡的透明度
     static let takenAlpha: CGFloat = 0.62
+
+    /// 加号面板 Transfer 格的图标:跟卡上同一对半头箭头(上 → 下 ←),模板图跟着 tint 走
+    static func swapIcon(size: CGFloat, stroke: CGFloat = 1.5) -> UIImage {
+        let img = UIGraphicsImageRenderer(size: CGSize(width: size, height: size)).image { _ in
+            let k = size / 24
+            let p = UIBezierPath()
+            p.move(to: CGPoint(x: 5 * k, y: 9 * k)); p.addLine(to: CGPoint(x: 18 * k, y: 9 * k))
+            p.addLine(to: CGPoint(x: 14.5 * k, y: 5.5 * k))
+            p.move(to: CGPoint(x: 19 * k, y: 15 * k)); p.addLine(to: CGPoint(x: 6 * k, y: 15 * k))
+            p.addLine(to: CGPoint(x: 9.5 * k, y: 18.5 * k))
+            p.lineWidth = stroke * k
+            p.lineCapStyle = .round
+            p.lineJoinStyle = .round
+            UIColor.black.setStroke()
+            p.stroke()
+        }
+        return img.withRenderingMode(.alwaysTemplate)
+    }
 }
 
 enum LXPocketNet {
