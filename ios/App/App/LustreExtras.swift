@@ -278,7 +278,7 @@ enum LustreConfig {
         return (lx["previewFocus"] as? String) ?? ""
     }()
     /// 只拍一样东西、不许露真数据的预览路线(输入栏 / 样板气泡):首页自检和整套巡游都不跑
-    static var previewNarrow: Bool { previewFocus == "composer" || previewFocus == "bubbles" || previewFocus == "coread" || previewFocus == "watch" }
+    static var previewNarrow: Bool { previewFocus == "composer" || previewFocus == "bubbles" || previewFocus == "coread" || previewFocus == "watch" || previewFocus == "pocket" }
 
     static var isPreview: Bool = {
         if let lx = config["lustre"] as? [String: Any], lx["preview"] as? Bool == true { return true }
@@ -2506,6 +2506,8 @@ public class NativeInputPlugin: CAPPlugin, CAPBridgedPlugin, UITextViewDelegate 
         return b
     }
 
+    func dismissPlusSheet() { sheetRef?.dismissSheet() }
+
     func showPlusSheet() {
         guard sheetRef == nil, let host = card?.superview else { return }
         tv?.resignFirstResponder()
@@ -2537,12 +2539,17 @@ public class NativeInputPlugin: CAPPlugin, CAPBridgedPlugin, UITextViewDelegate 
             ])
             b.addAction(UIAction { [weak self] _ in
                 self?.sheetRef?.dismissSheet()
-                self?.pickInto(id)
+                if id == "transfer" { LXPocketSheet.present() } else { self?.pickInto(id) }
             }, for: .touchUpInside)
             return b
         }
-        let tiles = UIStackView(arrangedSubviews: [tile("Camera", "camera", "addCamera"),
-                                                   tile("Photos", "photo.on.rectangle", "addPhotos")])
+        var tileList = [tile("Camera", "camera", "addCamera"), tile("Photos", "photo.on.rectangle", "addPhotos")]
+        // 1003 她的单:给他零花钱。只在他那条对话里有第三格
+        if ChatListPlugin.live?.data.session == LXPocketSheet.session
+            || (LustreConfig.isPreview && LustreConfig.previewFocus == "pocket") {
+            tileList.append(tile("Transfer", "arrow.left.arrow.right", "transfer"))
+        }
+        let tiles = UIStackView(arrangedSubviews: tileList)
         tiles.axis = .horizontal
         tiles.distribution = .fillEqually
         tiles.spacing = 10

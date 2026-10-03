@@ -54,6 +54,8 @@ struct LXMsg {
     var patAct: String = ""
     /// 0926 她:双击自己的头像 = 拍自己;他也能拍他自己
     var patSelf = false
+    /// 1003 零花钱:kind transfer / spend 的 meta.pocket(卡片照它画,text 只是给侧边栏/通知看的摘要)
+    var pocket: LXPocketInfo? = nil
 }
 
 struct LXChatTheme {
@@ -418,17 +420,19 @@ final class LXChatData {
             qText = "较早的一条消息"
             qId = rt
         }
-        return LXMsg(id: idn.int64Value, from: from, kind: kind, text: text,
-                     ts: date, session: (meta["api_session"] as? String) ?? "", attCount: atts.count,
-                     durSec: (meta["duration_sec"] as? NSNumber)?.intValue ?? 0,
-                     atts: atts, reactions: rx,
-                     starred: (meta["starred"] as? Bool) ?? false,
-                     approveLine: line,
-                     quoteName: qName, quoteText: qText, quoteId: qId,
-                     servesId: (meta["serves_id"] as? NSNumber)?.int64Value ?? 0,
-                     cid: (meta["cid"] as? String) ?? "",
-                     patAct: (meta["act"] as? String) ?? "",
-                     patSelf: (meta["self"] as? Bool) ?? false)
+        var m = LXMsg(id: idn.int64Value, from: from, kind: kind, text: text,
+                      ts: date, session: (meta["api_session"] as? String) ?? "", attCount: atts.count,
+                      durSec: (meta["duration_sec"] as? NSNumber)?.intValue ?? 0,
+                      atts: atts, reactions: rx,
+                      starred: (meta["starred"] as? Bool) ?? false,
+                      approveLine: line,
+                      quoteName: qName, quoteText: qText, quoteId: qId,
+                      servesId: (meta["serves_id"] as? NSNumber)?.int64Value ?? 0,
+                      cid: (meta["cid"] as? String) ?? "",
+                      patAct: (meta["act"] as? String) ?? "",
+                      patSelf: (meta["self"] as? Bool) ?? false)
+        if kind == "transfer" || kind == "spend" { m.pocket = LXPocketInfo.from(meta) }
+        return m
     }
 
     private func inSession(_ m: LXMsg) -> Bool {
@@ -436,6 +440,10 @@ final class LXChatData {
         return m.session == session
     }
     private func renderable(_ m: LXMsg) -> Bool {
+        // 预览 pocket 路线:屏幕上只放样板卡,真聊天一条都不露
+        if Self.pocketPreview, !pocketDemoIds.contains(m.id) { return false }
+        // 零花钱只画卡;没有 meta.pocket 的不退回成普通气泡
+        if m.kind == "transfer" || m.kind == "spend" { return m.pocket != nil }
         if m.kind == "thinking" { return !m.text.isEmpty }
         if m.kind == "pat" { return true }
         return !m.text.isEmpty || m.attCount > 0
@@ -559,7 +567,57 @@ final class LXChatData {
         }
     }
 
+    /// 1003 预览 pocket 路线(只拍零花钱卡)
+    static var pocketPreview: Bool { LustreConfig.isPreview && LustreConfig.previewFocus == "pocket" }
+    private var pocketDemoIds = Set<Int64>()
+
+    /// 预览 pocket 路线的六张样板:她给他的(已被收)/ 他那边的已收款 / 他回一句 / 他花了 / 他转给她(待收)/ 她转给他(待收,没写备注)
+    private func injectPocketDemo() {
+        guard pocketDemoIds.isEmpty else { return }       // fetchTail 再来一遍不重复塞
+        let base = (msgs.last?.id ?? 0) + 1000
+        let now = Date()
+        let session = (self.session == "__legacy__") ? "" : self.session
+        func pk(_ tid: Int, _ amt: Int, _ note: String, _ dir: String, _ role: String, _ status: String) -> LXPocketInfo {
+            LXPocketInfo(tid: tid, amt: amt, note: note, dir: dir, role: role, status: status)
+        }
+        func one(_ n: Int64, _ from: String, _ kind: String, _ text: String, _ p: LXPocketInfo?, _ ago: Double) -> LXMsg {
+            var m = LXMsg(id: base + n, from: from, kind: kind, text: text,
+                          ts: now.addingTimeInterval(-ago), session: session, attCount: 0)
+            m.pocket = p
+            return m
+        }
+        let demo: [LXMsg] = [
+            one(1, "human", "transfer", "转账 ¥52.00 · 零花钱，拿去花", pk(9001, 5200, "零花钱，拿去花", "give", "send", "done"), 300),
+            one(2, "ai", "transfer", "已收款 ¥52.00", pk(9001, 5200, "零花钱，拿去花", "give", "receipt", "done"), 290),
+            one(3, "ai", "reply", "收到啦，先存着", nil, 280),
+            one(4, "ai", "spend", "花了 ¥18.00 · 给你点了一杯热可可", pk(9002, 1800, "给你点了一杯热可可", "", "", ""), 270),
+            one(5, "ai", "transfer", "转账 ¥20.00 · 请你吃早饭", pk(9003, 2000, "请你吃早饭", "back", "send", "pending"), 260),
+            one(6, "human", "transfer", "转账 ¥5.20", pk(9004, 520, "", "give", "send", "pending"), 250),
+        ]
+        pocketDemoIds = Set(demo.map { $0.id })
+        merge(demo)
+    }
+
+    /// 预览:照服务器收款时的样子在本地演一遍——原卡变成已收 + 她这边冒一张"已收款"(id = 原 id + 100000)
+    func previewAcceptPocket(_ id: Int64) {
+        guard LustreConfig.isPreview, let m = idx[id], let p = m.pocket, p.pending else { return }
+        var done = m
+        done.pocket = LXPocketInfo(tid: p.tid, amt: p.amt, note: p.note, dir: p.dir, role: p.role, status: "done")
+        var r = LXMsg(id: m.id + 100000, from: "human", kind: "transfer", text: "已收款 " + LXPocketInfo.yuan(p.amt),
+                      ts: Date(), session: m.session, attCount: 0)
+        r.pocket = LXPocketInfo(tid: p.tid, amt: p.amt, note: p.note, dir: "back", role: "receipt", status: "done")
+        if Self.pocketPreview { pocketDemoIds.insert(r.id) }
+        merge([done, r])
+        rebuild(stick: true)
+    }
+
     private func injectPreviewShowcase() {
+        if Self.pocketPreview {
+            // 跟 coread/watch 一样,一秒后起那条路线自己的步骤(只起一次)
+            if pocketDemoIds.isEmpty { DispatchQueue.main.asyncAfter(deadline: .now() + 1) { LXPocketPreview.start() } }
+            injectPocketDemo()
+            return
+        }
         DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
             if LustreConfig.previewFocus == "composer" { ChatListPlugin.live?.previewComposerTour() }
             else if LustreConfig.previewFocus == "bubbles" { ChatListPlugin.live?.previewBubbleSampler() }
@@ -1036,7 +1094,7 @@ final class LXChatData {
         let allVisible = mergeTurnThinking(order.compactMap { idx[$0] }.filter { inSession($0) && renderable($0) })
         lastVisible = allVisible
         let visible = thinkInSheet ? allVisible.filter { $0.kind != "thinking" } : allVisible
-        let liveActive = (!thinkDraft.isEmpty || thinkStart != nil) && !thinkInSheet
+        let liveActive = (!thinkDraft.isEmpty || thinkStart != nil) && !thinkInSheet && !Self.pocketPreview
         var liveAt: Int? = nil
         for (i, m) in visible.enumerated() {
             if liveActive, liveAt == nil, m.id > liveThinkStartId, m.kind != "thinking" { liveAt = out.count }
@@ -1078,7 +1136,7 @@ final class LXChatData {
             out.insert(contentsOf: liveRows, at: at)
             liveRowIdx = at
         }
-        if !draft.isEmpty {
+        if !draft.isEmpty, !Self.pocketPreview {
             out.append(.msg(LXMsg(id: .max, from: "ai", kind: "reply",
                                   text: String(draft.prefix(draftShown)),
                                   ts: Date(), session: session, attCount: 0), showTime: false, tail: true, grouped: false, afterThink: false))
@@ -3532,6 +3590,244 @@ final class LXApproveCell: UITableViewCell {
     }
 }
 
+/// 1003 零花钱卡(kind transfer / spend,数据在 meta.pocket)。参数照她批的样子稿:
+/// 转账 = 240 宽、圆角 14、星芒色底、内边 14,左边 40 的圈里画双箭头(待收)或对勾,右边金额 + 一行小字;
+/// 花钱 = 最宽 260、上下 10 左右 12、他那边的卡底 + 1 细边,左边 30 的 ¥ 币,右边"花了多少" + 备注。
+/// 她的靠右、他的靠左,离屏边跟气泡一样(头像模式 56,不开 16);没有尾巴、没有长按菜单
+final class LXPocketCell: UITableViewCell {
+    static let reuse = "lxPocket"
+    static func wants(_ m: LXMsg) -> Bool { m.pocket != nil && (m.kind == "transfer" || m.kind == "spend") }
+
+    var onTap: ((LXMsg) -> Void)?
+    private var msg: LXMsg?
+    private let card = UIView()
+    // 转账
+    private let tBox = UIView()
+    private let ring = UIView()
+    private let glyphV = UIView()
+    private let glyph = CAShapeLayer()
+    private let tCol = UIView()
+    private let amtL = UILabel()
+    private let stateL = UILabel()
+    private let subL = UILabel()
+    // 花钱
+    private let sBox = UIView()
+    private let coin = UILabel()
+    private let sCol = UIStackView()
+    private let headL = UILabel()
+    private let noteL = UILabel()
+    private let tapG = UITapGestureRecognizer()
+    private var leftC: NSLayoutConstraint!
+    private var rightC: NSLayoutConstraint!
+    private var topC: NSLayoutConstraint!
+    private var botC: NSLayoutConstraint!
+    private var wC: NSLayoutConstraint!
+    private var hC: NSLayoutConstraint!
+
+    override init(style: UITableViewCell.CellStyle, reuseIdentifier: String?) {
+        super.init(style: style, reuseIdentifier: reuseIdentifier)
+        backgroundColor = .clear
+        selectionStyle = .none
+        card.translatesAutoresizingMaskIntoConstraints = false
+        card.layer.cornerRadius = 14
+        card.layer.cornerCurve = .continuous
+        card.clipsToBounds = true
+        contentView.addSubview(card)
+        for v in [tBox, sBox] {
+            v.translatesAutoresizingMaskIntoConstraints = false
+            card.addSubview(v)
+        }
+
+        ring.translatesAutoresizingMaskIntoConstraints = false
+        ring.layer.cornerRadius = 20
+        ring.layer.borderWidth = 1.6
+        glyphV.translatesAutoresizingMaskIntoConstraints = false
+        glyphV.isUserInteractionEnabled = false
+        // 24 的画框缩到 20:线宽 1.8 跟着缩
+        glyph.frame = CGRect(x: 0, y: 0, width: 20, height: 20)
+        glyph.fillColor = UIColor.clear.cgColor
+        glyph.lineWidth = 1.8 * 20 / 24
+        glyph.lineCap = .round
+        glyph.lineJoin = .round
+        glyphV.layer.addSublayer(glyph)
+        ring.addSubview(glyphV)
+        tCol.translatesAutoresizingMaskIntoConstraints = false
+        amtL.translatesAutoresizingMaskIntoConstraints = false
+        amtL.font = .systemFont(ofSize: 17, weight: .semibold)
+        amtL.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        stateL.translatesAutoresizingMaskIntoConstraints = false
+        stateL.font = .systemFont(ofSize: 12)
+        stateL.textAlignment = .right
+        stateL.setContentCompressionResistancePriority(.required, for: .horizontal)
+        stateL.setContentHuggingPriority(.required, for: .horizontal)
+        subL.translatesAutoresizingMaskIntoConstraints = false
+        subL.font = .systemFont(ofSize: 13)
+        subL.numberOfLines = 1
+        subL.lineBreakMode = .byTruncatingTail
+        subL.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        tCol.addSubview(amtL); tCol.addSubview(stateL); tCol.addSubview(subL)
+        tBox.addSubview(ring); tBox.addSubview(tCol)
+
+        coin.translatesAutoresizingMaskIntoConstraints = false
+        coin.text = "¥"
+        coin.font = .systemFont(ofSize: 13, weight: .bold)
+        coin.textAlignment = .center
+        coin.layer.cornerRadius = 15
+        coin.clipsToBounds = true
+        headL.font = .systemFont(ofSize: 15, weight: .semibold)
+        headL.numberOfLines = 1
+        headL.lineBreakMode = .byTruncatingTail
+        noteL.font = .systemFont(ofSize: 13)
+        noteL.numberOfLines = 0
+        sCol.translatesAutoresizingMaskIntoConstraints = false
+        sCol.axis = .vertical
+        sCol.alignment = .fill
+        sCol.spacing = 2
+        sCol.addArrangedSubview(headL); sCol.addArrangedSubview(noteL)
+        sBox.addSubview(coin); sBox.addSubview(sCol)
+
+        leftC = card.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 16)
+        rightC = card.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -16)
+        topC = card.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 7)
+        botC = contentView.bottomAnchor.constraint(equalTo: card.bottomAnchor, constant: 1)
+        botC.priority = UILayoutPriority(999)
+        wC = card.widthAnchor.constraint(equalToConstant: 240)
+        hC = card.heightAnchor.constraint(equalToConstant: 68)
+        var cs: [NSLayoutConstraint] = [leftC!, topC!, botC!, wC!, hC!]
+        for b in [tBox, sBox] {
+            cs += [b.topAnchor.constraint(equalTo: card.topAnchor), b.bottomAnchor.constraint(equalTo: card.bottomAnchor),
+                   b.leadingAnchor.constraint(equalTo: card.leadingAnchor), b.trailingAnchor.constraint(equalTo: card.trailingAnchor)]
+        }
+        cs += [
+            ring.leadingAnchor.constraint(equalTo: tBox.leadingAnchor, constant: 14),
+            ring.centerYAnchor.constraint(equalTo: tBox.centerYAnchor),
+            ring.widthAnchor.constraint(equalToConstant: 40),
+            ring.heightAnchor.constraint(equalToConstant: 40),
+            glyphV.centerXAnchor.constraint(equalTo: ring.centerXAnchor),
+            glyphV.centerYAnchor.constraint(equalTo: ring.centerYAnchor),
+            glyphV.widthAnchor.constraint(equalToConstant: 20),
+            glyphV.heightAnchor.constraint(equalToConstant: 20),
+            tCol.leadingAnchor.constraint(equalTo: ring.trailingAnchor, constant: 12),
+            tCol.trailingAnchor.constraint(equalTo: tBox.trailingAnchor, constant: -14),
+            tCol.centerYAnchor.constraint(equalTo: tBox.centerYAnchor),
+            amtL.topAnchor.constraint(equalTo: tCol.topAnchor),
+            amtL.leadingAnchor.constraint(equalTo: tCol.leadingAnchor),
+            stateL.trailingAnchor.constraint(equalTo: tCol.trailingAnchor),
+            stateL.firstBaselineAnchor.constraint(equalTo: amtL.firstBaselineAnchor),
+            stateL.leadingAnchor.constraint(greaterThanOrEqualTo: amtL.trailingAnchor, constant: 8),
+            subL.topAnchor.constraint(equalTo: amtL.bottomAnchor, constant: 2),
+            subL.leadingAnchor.constraint(equalTo: tCol.leadingAnchor),
+            subL.trailingAnchor.constraint(equalTo: tCol.trailingAnchor),
+            subL.bottomAnchor.constraint(equalTo: tCol.bottomAnchor),
+            coin.leadingAnchor.constraint(equalTo: sBox.leadingAnchor, constant: 12),
+            coin.centerYAnchor.constraint(equalTo: sBox.centerYAnchor),
+            coin.widthAnchor.constraint(equalToConstant: 30),
+            coin.heightAnchor.constraint(equalToConstant: 30),
+            sCol.leadingAnchor.constraint(equalTo: coin.trailingAnchor, constant: 10),
+            sCol.trailingAnchor.constraint(equalTo: sBox.trailingAnchor, constant: -12),
+            sCol.centerYAnchor.constraint(equalTo: sBox.centerYAnchor),
+        ]
+        NSLayoutConstraint.activate(cs)
+        tapG.addTarget(self, action: #selector(tapped))
+        card.addGestureRecognizer(tapG)
+    }
+    required init?(coder: NSCoder) { fatalError() }
+
+    @objc private func tapped() {
+        guard let m = msg else { return }
+        onTap?(m)
+    }
+
+    /// 样子稿的两枚图标(24 画框):待收 = 一来一回两支箭头,其余 = 对勾
+    private static func glyphPath(swap: Bool) -> CGPath {
+        let p = UIBezierPath()
+        if swap {
+            // M5 9h13l-3.5-3.5M19 15H6l3.5 3.5
+            p.move(to: CGPoint(x: 5, y: 9)); p.addLine(to: CGPoint(x: 18, y: 9)); p.addLine(to: CGPoint(x: 14.5, y: 5.5))
+            p.move(to: CGPoint(x: 19, y: 15)); p.addLine(to: CGPoint(x: 6, y: 15)); p.addLine(to: CGPoint(x: 9.5, y: 18.5))
+        } else {
+            // M5 12.5l4.5 4.5L19 7.5
+            p.move(to: CGPoint(x: 5, y: 12.5)); p.addLine(to: CGPoint(x: 9.5, y: 17)); p.addLine(to: CGPoint(x: 19, y: 7.5))
+        }
+        p.apply(CGAffineTransform(scaleX: 20.0 / 24.0, y: 20.0 / 24.0))
+        return p.cgPath
+    }
+
+    /// 颜色每次都在这里现取(LXPocketInk / 主题),换月相重配就跟着换
+    func configure(_ m: LXMsg, grouped: Bool, afterThink: Bool, theme: LXChatTheme, cellW: CGFloat) {
+        msg = m
+        guard let p = m.pocket else { tapG.isEnabled = false; return }
+        let mine = m.from == "human"
+        let av = theme.avatars
+        let inset: CGFloat = av ? LXBubbleCell.avaInset : 16
+        leftC.constant = inset
+        rightC.constant = -inset
+        if mine { leftC.isActive = false; rightC.isActive = true } else { rightC.isActive = false; leftC.isActive = true }
+        // 上下空跟气泡一样(头像模式行顶 3.1、行底 20.35)
+        topC.constant = av ? LXBubbleCell.avaLift : (afterThink ? 2 : (grouped ? (mine ? 4 : 0.5) : 7))
+        botC.constant = av ? LXBubbleCell.avaRowGap : 1
+        let maxW: CGFloat = cellW > 10 ? max(120, cellW - 2 * inset) : 10_000
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        if m.kind == "spend" {
+            tBox.isHidden = true; sBox.isHidden = false
+            amtL.text = nil; stateL.text = nil; subL.text = nil
+            // 他那边气泡的底色;主题里他的气泡是透明的(没底),就用卡底
+            card.backgroundColor = theme.ai.cgColor.alpha > 0.05 ? theme.ai : theme.cardBg
+            card.layer.borderWidth = 1
+            card.layer.borderColor = theme.hairline.cgColor
+            card.alpha = 1
+            coin.backgroundColor = LXPocketInk.star
+            coin.textColor = LXPocketInk.fg
+            // 卡有自己的底,字用卡的墨(theme.aiFg 会跟壁纸变,放卡上可能看不见)
+            headL.textColor = LXSheetInk.text
+            headL.text = "\(LXNick.yan) 花了 \(LXPocketInfo.yuan(p.amt))"
+            noteL.textColor = LXSheetInk.soft
+            noteL.text = p.note
+            noteL.isHidden = p.note.isEmpty
+            let textMax = max(40, min(260, maxW) - 64)
+            let inf = CGFloat.greatestFiniteMagnitude
+            let headSz = headL.sizeThatFits(CGSize(width: inf, height: inf))
+            var colW = min(textMax, ceil(headSz.width))
+            var colH = ceil(headSz.height)
+            if !p.note.isEmpty {
+                colW = max(colW, min(textMax, ceil(noteL.sizeThatFits(CGSize(width: textMax, height: inf)).width)))
+                colH += 2 + ceil(noteL.sizeThatFits(CGSize(width: colW, height: inf)).height)
+            }
+            noteL.preferredMaxLayoutWidth = max(1, colW)
+            wC.constant = 12 + 30 + 10 + colW + 12
+            hC.constant = 10 + max(30, colH) + 10
+            tapG.isEnabled = false
+        } else {
+            tBox.isHidden = false; sBox.isHidden = true
+            headL.text = nil; noteL.text = nil
+            let fg = LXPocketInk.fg, soft = LXPocketInk.soft
+            card.backgroundColor = LXPocketInk.star
+            card.layer.borderWidth = 0
+            card.alpha = p.taken ? LXPocketInk.takenAlpha : 1
+            ring.layer.borderColor = fg.cgColor
+            glyph.strokeColor = fg.cgColor
+            glyph.path = Self.glyphPath(swap: p.pending)
+            amtL.textColor = fg
+            amtL.text = LXPocketInfo.yuan(p.amt)
+            stateL.textColor = soft
+            stateL.text = p.pending ? "待收款" : nil
+            stateL.isHidden = !p.pending
+            subL.textColor = soft
+            if p.taken { subL.text = "已被接收" }
+            else if p.role == "receipt" { subL.text = "已收款" }
+            else if !p.note.isEmpty { subL.text = p.note }
+            else { subL.text = mine ? "转账给\(LXNick.yan)" : "转账给你" }
+            wC.constant = min(240, maxW)
+            hC.constant = 68
+            // 只有他转给她、还没收的那张能点
+            tapG.isEnabled = !mine && p.dir == "back" && p.pending
+        }
+        CATransaction.commit()
+        setNeedsLayout()
+    }
+}
+
 final class LXFootCell: UITableViewCell {
     static let reuse = "lxFoot"
     let star = UIImageView()
@@ -5166,6 +5462,7 @@ public class ChatListPlugin: CAPPlugin, CAPBridgedPlugin, UITableViewDataSource,
         t.register(LXThinkBodyCell.self, forCellReuseIdentifier: LXThinkBodyCell.reuse)
         t.register(LXFootCell.self, forCellReuseIdentifier: LXFootCell.reuse)
         t.register(LXApproveCell.self, forCellReuseIdentifier: LXApproveCell.reuse)
+        t.register(LXPocketCell.self, forCellReuseIdentifier: LXPocketCell.reuse)
         t.dataSource = self
         t.delegate = self
         let tap = UITapGestureRecognizer(target: self, action: #selector(bgTap))
@@ -5290,7 +5587,8 @@ public class ChatListPlugin: CAPPlugin, CAPBridgedPlugin, UITableViewDataSource,
         armPushIntake()
 
         if LustreConfig.isPreview && LustreConfig.previewFocus == "bubbles" { previewBubbleSampler() }
-        if LustreConfig.isPreview && !LustreConfig.previewNarrow {
+        // pocket 路线只拍零花钱卡:整套巡游(开抽屉/面板/换月相/塞消息)不跑
+        if LustreConfig.isPreview && !LustreConfig.previewNarrow && !LXChatData.pocketPreview {
             DispatchQueue.main.asyncAfter(deadline: .now() + 8) { [weak self] in
                 guard let s = self else { return }
                 var target: Int64? = nil
@@ -6349,6 +6647,7 @@ public class ChatListPlugin: CAPPlugin, CAPBridgedPlugin, UITableViewDataSource,
     private var lastTailSig = ""
     private var lastDecoSig = ""
     private var lastOrderHash = 0
+    private var lastPocketSig = 0   // 转账卡的状态(待收/已收):上面那张改了状态也要重配
     private var lastTableKeys: [Int] = []
     private var lastContentSig = 0
     private var fullPaints = 0
@@ -6395,7 +6694,10 @@ public class ChatListPlugin: CAPPlugin, CAPBridgedPlugin, UITableViewDataSource,
     private func rowSig(_ r: LXRow) -> String {
         switch r {
         case .day(let s): return "d:" + s
-        case .msg(let m, _, _, _, _): return "m:\(m.id)"
+        case .msg(let m, _, _, _, _):
+            // 零花钱卡收款后同一条改状态:签名带上,漏重配的会被 verifyRows 认出来
+            if let p = m.pocket { return "m:\(m.id):\(p.role):\(p.status)" }
+            return "m:\(m.id)"
         case .thinkHead(let m, let open, _, let live): return "th:\(m.id):\(open):\(live)"
         case .thinkBody(let m): return "tb:\(m.id)"
         case .typing: return "ty"
@@ -6425,9 +6727,15 @@ public class ChatListPlugin: CAPPlugin, CAPBridgedPlugin, UITableViewDataSource,
         }
         let prefixHash = hPre.finalize()
         let newTableKeys = data.rows.reversed().map(rowKey)
+        var hP = Hasher()
+        for r in data.rows {
+            if case .msg(let m, _, _, _, _) = r, let p = m.pocket { hP.combine(m.id); hP.combine(p.status) }
+        }
+        let pocketSig = hP.finalize()
         if contentEnd == lastRowCount, lastRowCount > 0, decoSig == lastDecoSig,
-           contentTail == lastTailSig, orderHash == lastOrderHash,
+           contentTail == lastTailSig, orderHash == lastOrderHash, pocketSig == lastPocketSig,
            liveTailRefresh(t, stick: stick) { lastTableKeys = newTableKeys; return }
+        lastPocketSig = pocketSig
         // 0925 根治:思考计时每秒重排一次,行一条没变也把所有可见行重配+重算行高——没变就什么都不做
         var hC = Hasher()
         for r in data.rows {
@@ -6459,6 +6767,10 @@ public class ChatListPlugin: CAPPlugin, CAPBridgedPlugin, UITableViewDataSource,
                 t.performBatchUpdates { t.insertRows(at: inserted, with: .none) }
                 if retail.row < t.numberOfRows(inSection: 0) {
                     reconfigureVisible(t, at: retail)
+                }
+                // 1003:收款时服务器把原卡改成已收、同时推一张已收款,两条常一批到——上面的转账卡也得重配(卡便宜,高度不变)
+                for ip in t.indexPathsForVisibleRows ?? [] where ip != retail && t.cellForRow(at: ip) is LXPocketCell {
+                    reconfigureVisible(t, at: ip)
                 }
                 if stick && !stickDisarmed && !(t.isTracking || t.isDragging || t.isDecelerating) && (forceStick || nearBottom || Date() < pinUntil) {
                     if Date() < pinUntil { self.pinToBottom(t) } else { self.scrollToBottom(t) }
@@ -6691,6 +7003,7 @@ public class ChatListPlugin: CAPPlugin, CAPBridgedPlugin, UITableViewDataSource,
     private lazy var szDay = LXDayCell(style: .default, reuseIdentifier: nil)
     private lazy var szBubble = LXBubbleCell(style: .default, reuseIdentifier: nil)
     private lazy var szApprove = LXApproveCell(style: .default, reuseIdentifier: nil)
+    private lazy var szPocket = LXPocketCell(style: .default, reuseIdentifier: nil)
     private lazy var szThinkHead = LXThinkHeadCell(style: .default, reuseIdentifier: nil)
     private lazy var szThinkBody = LXThinkBodyCell(style: .default, reuseIdentifier: nil)
     private lazy var szFoot = LXFootCell(style: .default, reuseIdentifier: nil)
@@ -6700,7 +7013,9 @@ public class ChatListPlugin: CAPPlugin, CAPBridgedPlugin, UITableViewDataSource,
         switch r {
         case .day(let s): return "d:\(s)"
         case .msg(let m, let st, let tl, let gp, let at):
-            return "m:\(m.echoId != 0 ? m.echoId : m.id):\(LXBubbleCell.voiceOpen.contains(m.id) ? 1 : 0):\(m.text.hashValue):\(m.attCount):\(m.reactions.joined(separator: " ").hashValue):\(m.quoteId != 0 ? 1 : 0):\(m.approveLine ?? "-"):\(st ? 1 : 0)\(tl ? 1 : 0)\(gp ? 1 : 0)\(at ? 1 : 0):\(theme.avatars ? 1 : 0):\(m.failed ? 1 : 0)"
+            // 零花钱卡:收款改状态要重量重画;备注长短决定花钱卡高
+            let pk: String = m.pocket.map { "\($0.role)/\($0.status)/\($0.note.hashValue)" } ?? "-"
+            return "m:\(m.echoId != 0 ? m.echoId : m.id):\(LXBubbleCell.voiceOpen.contains(m.id) ? 1 : 0):\(m.text.hashValue):\(m.attCount):\(m.reactions.joined(separator: " ").hashValue):\(m.quoteId != 0 ? 1 : 0):\(m.approveLine ?? "-"):\(st ? 1 : 0)\(tl ? 1 : 0)\(gp ? 1 : 0)\(at ? 1 : 0):\(theme.avatars ? 1 : 0):\(m.failed ? 1 : 0):\(pk)"
         case .thinkHead(let m, let open, let label, let live): return "th:\(m.id):\(open ? 1 : 0):\(live ? 1 : 0):\(label):\(theme.avatars ? 1 : 0)"
         case .thinkBody(let m): return "tb:\(m.id):\(m.text.hashValue):\(theme.avatars ? 1 : 0)"
         case .foot: return "f"
@@ -6727,7 +7042,10 @@ public class ChatListPlugin: CAPPlugin, CAPBridgedPlugin, UITableViewDataSource,
         case .day(let s):
             szDay.configure(s, theme: theme); cell = szDay
         case .msg(let m, let st, let tl, let gp, let at):
-            if m.approveLine != nil { szApprove.configure(m, theme: theme); cell = szApprove }
+            if LXPocketCell.wants(m) {
+                szPocket.configure(m, grouped: gp, afterThink: at, theme: theme, cellW: width); cell = szPocket
+            }
+            else if m.approveLine != nil { szApprove.configure(m, theme: theme); cell = szApprove }
             else {
                 szBubble.configure(m, showTime: st, tail: tl, grouped: gp, afterThink: at, theme: theme, cellW: width,
                                    avaTime: theme.avatars ? .own : .none)
@@ -6782,9 +7100,14 @@ public class ChatListPlugin: CAPPlugin, CAPBridgedPlugin, UITableViewDataSource,
         guard i >= 0, i < data.rows.count else { return }
         switch data.rows[i] {
         case .msg(let m, let showTime, let tail, let grouped, let afterThink):
-            guard m.approveLine == nil, let c = cell as? LXBubbleCell else { return }
-            c.configure(m, showTime: showTime, tail: tail, grouped: grouped, afterThink: afterThink, theme: theme, cellW: t.bounds.width, avaTime: avaTimeFor(i, width: t.bounds.width))
-            c.setRing(multiOn && multiSel.contains(m.id), color: theme.accent)
+            if LXPocketCell.wants(m) {
+                guard let pc = cell as? LXPocketCell else { return }
+                pc.configure(m, grouped: grouped, afterThink: afterThink, theme: theme, cellW: t.bounds.width)
+            } else {
+                guard m.approveLine == nil, let c = cell as? LXBubbleCell else { return }
+                c.configure(m, showTime: showTime, tail: tail, grouped: grouped, afterThink: afterThink, theme: theme, cellW: t.bounds.width, avaTime: avaTimeFor(i, width: t.bounds.width))
+                c.setRing(multiOn && multiSel.contains(m.id), color: theme.accent)
+            }
         case .thinkHead(let m, let open, let label, let live):
             (cell as? LXThinkHeadCell)?.configure(label: label, open: open, live: live, theme: theme)
             _ = m
@@ -7183,6 +7506,12 @@ public class ChatListPlugin: CAPPlugin, CAPBridgedPlugin, UITableViewDataSource,
             c.configure(s, theme: theme)
             return c
         case .msg(let m, let showTime, let tail, let grouped, let afterThink):
+            if LXPocketCell.wants(m) {
+                let c = tableView.dequeueReusableCell(withIdentifier: LXPocketCell.reuse, for: indexPath) as! LXPocketCell
+                c.configure(m, grouped: grouped, afterThink: afterThink, theme: theme, cellW: tableView.bounds.width)
+                c.onTap = { [weak self] msg in self?.pocketTapped(msg) }
+                return c
+            }
             if m.approveLine != nil {
                 let c = tableView.dequeueReusableCell(withIdentifier: LXApproveCell.reuse, for: indexPath) as! LXApproveCell
                 c.configure(m, theme: theme)
@@ -7220,6 +7549,32 @@ public class ChatListPlugin: CAPPlugin, CAPBridgedPlugin, UITableViewDataSource,
             c.configure(theme: theme)
             return c
         }
+    }
+
+    /// 1003 零花钱卡:只有他转给她、还没收的那张点了有反应——收下。
+    /// 服务器收完会把同一条(改成已收)和一张"已收款"推回来,这里不用画;失败只震一下
+    private var pocketBusy = Set<Int>()
+    func pocketTapped(_ m: LXMsg) {
+        guard !multiOn, m.kind == "transfer", m.from == "ai", let p = m.pocket, p.dir == "back", p.pending,
+              !pocketBusy.contains(p.tid) else { return }
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        if LustreConfig.isPreview { data.previewAcceptPocket(m.id); return }
+        pocketBusy.insert(p.tid)
+        LXPocketNet.accept(tid: p.tid) { [weak self] ok in
+            self?.pocketBusy.remove(p.tid)
+            if !ok { UINotificationFeedbackGenerator().notificationOccurred(.error) }
+        }
+    }
+
+    /// 预览脚本用:等于点了第一张他转来、还没收的卡。调用 ChatListPlugin.live?.previewAcceptPocket()
+    func previewAcceptPocket() {
+        guard LustreConfig.isPreview else { return }
+        let hit = data.msgs.first { m in
+            guard let p = m.pocket else { return false }
+            return m.kind == "transfer" && m.from == "ai" && p.dir == "back" && p.pending
+        }
+        guard let m = hit else { return }
+        pocketTapped(m)
     }
 
     public func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
