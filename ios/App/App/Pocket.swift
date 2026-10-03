@@ -208,6 +208,9 @@ final class LXPocketSheet: UIViewController, UITextFieldDelegate {
 
         noteBox.backgroundColor = LXPocketInk.tileBg
         noteBox.layer.cornerRadius = 12
+        // 白天面板底和输入框底几乎一样白:描一圈细线才看得出框
+        noteBox.layer.borderWidth = RPSpec.moonState == "day" ? 1 : 0
+        noteBox.layer.borderColor = LXPocketInk.line.cgColor
         noteF.font = .systemFont(ofSize: 15)
         noteF.textColor = LXPocketInk.text
         noteF.tintColor = LXPocketInk.star
