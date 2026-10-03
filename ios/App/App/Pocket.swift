@@ -584,7 +584,15 @@ final class LXPocketVC: UIViewController {
         let row = UIView()
         row.tag = 2
         let k = UILabel()
-        k.text = it.type == "spend" ? "¥" : "⇄"
+        k.text = it.type == "spend" ? "¥" : nil
+        if it.type != "spend" {
+            // 跟卡上、加号格子同一对半头箭头,不用字符 ⇄
+            let iv = UIImageView(image: LXPocketInk.swapIcon(size: 18, stroke: 1.6))
+            iv.tintColor = LXPocketInk.text
+            iv.contentMode = .center
+            iv.frame = CGRect(x: 0, y: 0, width: 32, height: 32)
+            k.addSubview(iv)
+        }
         k.font = LXCardSheet.anthro(13, semibold: true)
         k.textAlignment = .center
         k.textColor = LXPocketInk.text
@@ -723,7 +731,10 @@ enum LXPocketPreview {
         var sheet: LXPocketSheet?
         let steps: [(UIColor, () -> Void)] = [
             (.yellow, { }),                                                                   // 聊天里的卡(月夜)
-            (.cyan, { ChatListPlugin.live?.previewAcceptPocket() }),                          // 点他转来的那张收下
+            (.cyan, {                                                                         // 点他转来的那张收下 + 开头像模式
+                ChatListPlugin.live?.previewAcceptPocket()
+                ChatListPlugin.live?.rpToggleAvatars()
+            }),
             (.red, { ChatListPlugin.live?.switchMoon("half") }),                              // 半月:橙底白字
             (UIColor(red: 0.5, green: 0, blue: 1, alpha: 1), {                                // 白天 + 加号面板三格
                 ChatListPlugin.live?.switchMoon("day")

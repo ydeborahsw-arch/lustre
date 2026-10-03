@@ -3617,6 +3617,11 @@ final class LXPocketCell: UITableViewCell {
     private let headL = UILabel()
     private let noteL = UILabel()
     private let tapG = UITapGestureRecognizer()
+    // 1003 她:转账也是一条消息,头像模式下跟气泡一样带各自的头像,头像下是这条的时间
+    private let avaV = UIImageView()
+    private let avaTimeL = UILabel()
+    private var avaLC: NSLayoutConstraint!
+    private var avaRC: NSLayoutConstraint!
     private var leftC: NSLayoutConstraint!
     private var rightC: NSLayoutConstraint!
     private var topC: NSLayoutConstraint!
@@ -3686,6 +3691,19 @@ final class LXPocketCell: UITableViewCell {
         sCol.addArrangedSubview(headL); sCol.addArrangedSubview(noteL)
         sBox.addSubview(coin); sBox.addSubview(sCol)
 
+        avaV.translatesAutoresizingMaskIntoConstraints = false
+        avaV.contentMode = .scaleAspectFill
+        avaV.clipsToBounds = true
+        avaV.layer.cornerRadius = LXBubbleCell.avaSize * 0.14
+        avaV.layer.cornerCurve = .circular
+        avaV.backgroundColor = UIColor(white: 1, alpha: 0.08)
+        avaV.isHidden = true
+        avaTimeL.translatesAutoresizingMaskIntoConstraints = false
+        avaTimeL.isHidden = true
+        contentView.addSubview(avaV)
+        contentView.addSubview(avaTimeL)
+        avaLC = avaV.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: LXBubbleCell.avaEdge)
+        avaRC = avaV.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -LXBubbleCell.avaEdge)
         leftC = card.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 16)
         rightC = card.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -16)
         topC = card.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 7)
@@ -3693,7 +3711,12 @@ final class LXPocketCell: UITableViewCell {
         botC.priority = UILayoutPriority(999)
         wC = card.widthAnchor.constraint(equalToConstant: 240)
         hC = card.heightAnchor.constraint(equalToConstant: 68)
-        var cs: [NSLayoutConstraint] = [leftC!, topC!, botC!, wC!, hC!]
+        var cs: [NSLayoutConstraint] = [leftC!, topC!, botC!, wC!, hC!, avaLC!,
+            avaV.topAnchor.constraint(equalTo: card.topAnchor),
+            avaV.widthAnchor.constraint(equalToConstant: LXBubbleCell.avaSize),
+            avaV.heightAnchor.constraint(equalToConstant: LXBubbleCell.avaSize),
+            avaTimeL.topAnchor.constraint(equalTo: avaV.bottomAnchor, constant: 4),
+            avaTimeL.centerXAnchor.constraint(equalTo: avaV.centerXAnchor)]
         for b in [tBox, sBox] {
             cs += [b.topAnchor.constraint(equalTo: card.topAnchor), b.bottomAnchor.constraint(equalTo: card.bottomAnchor),
                    b.leadingAnchor.constraint(equalTo: card.leadingAnchor), b.trailingAnchor.constraint(equalTo: card.trailingAnchor)]
@@ -3763,6 +3786,14 @@ final class LXPocketCell: UITableViewCell {
         leftC.constant = inset
         rightC.constant = -inset
         if mine { leftC.isActive = false; rightC.isActive = true } else { rightC.isActive = false; leftC.isActive = true }
+        avaV.isHidden = !av
+        avaTimeL.isHidden = !av
+        if av {
+            if mine { avaLC.isActive = false; avaRC.isActive = true } else { avaRC.isActive = false; avaLC.isActive = true }
+            avaV.image = LXAvatarStore.image(mine ? "human" : (m.session.isEmpty ? "zhao" : "ai"))
+            avaTimeL.attributedText = NSAttributedString(string: LXChatData.timeFmt.string(from: m.ts),
+                attributes: [.font: UIFont.systemFont(ofSize: 9), .foregroundColor: theme.faint.withAlphaComponent(0.85)])
+        }
         // 上下空跟气泡一样(头像模式行顶 3.1、行底 20.35)
         topC.constant = av ? LXBubbleCell.avaLift : (afterThink ? 2 : (grouped ? (mine ? 4 : 0.5) : 7))
         botC.constant = av ? LXBubbleCell.avaRowGap : 1
