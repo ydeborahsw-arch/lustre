@@ -1630,6 +1630,14 @@ final class LXMomentsVC: UIViewController, UIScrollViewDelegate, PHPickerViewCon
         for im in imgs { composer.addPicked(nil, thumb: im) { _ in } }
     }
     func previewCloseComposer() { composer.clear(); showComposer(false) }
+    /// 换白天:关大图、回顶上、按白天的颜色重新上色,再点开第一条的"··"
+    func previewDay() {
+        LXLightbox.live?.close(animated: false)
+        ChatListPlugin.live?.switchMoon("day")
+        paint()
+        scroll.setContentOffset(.zero, animated: false)
+        previewOps(0)
+    }
 }
 
 // MARK: - 预览路线 moments:假数据(不连服务器),六步
@@ -1689,6 +1697,7 @@ enum LXMomentsPreview {
         let mark = UIView(frame: LXBubbleSampler.beacon)
         mark.backgroundColor = UIColor(red: 1, green: 0, blue: 1, alpha: 1)
         let phase = UIView(frame: CGRect(x: 28, y: 70, width: 20, height: 20))
+        // 第一步一开页就亮着(截图开始得比这里晚,别错过开页那一眼),往后每步 12 秒
         let steps: [(UIColor, () -> Void)] = [
             (.yellow, { }),                                                                    // 封面 + 头几条
             (.cyan, { vc.previewOps(0) }),                                                     // 点"··":赞 / 评论
@@ -1696,9 +1705,10 @@ enum LXMomentsPreview {
             (UIColor(red: 0.5, green: 0, blue: 1, alpha: 1), { vc.previewScroll(to: 1) }),       // 往下:单图、四图、五图
             (.white, { vc.previewComposer("Sample new post", [swatch(colors[1], 400, 400), swatch(colors[2], 400, 300)]) }),  // 发布卡
             (.gray, { vc.previewCloseComposer(); vc.showImage("pv-wide.jpg") }),               // 看大图(带存相册)
+            (.orange, { vc.previewDay() }),                                                    // 白天:顶上 + 小菜单
         ]
         for (i, st) in steps.enumerated() {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 6 + Double(i) * 12) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + (i == 0 ? 0.5 : 40 + Double(i - 1) * 12)) {
                 st.1()
                 phase.backgroundColor = st.0
                 let host: UIView = LXLightbox.live?.superview ?? vc.view

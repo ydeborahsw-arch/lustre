@@ -95,9 +95,9 @@ jobs:
             while [ $SECONDS -lt $end ]; do shot w$i; i=$((i + 1)); sleep 2; done
           elif [ "$LX_PREVIEW_FOCUS" = "moments" ]; then
             # The moments page with sample posts and coloured sample pictures (no server; nothing is sent).
-            # Six steps, 12 s each, starting about 6 s after the chat finishes loading.
+            # Seven steps: the first is on from the moment the page opens, then one every 12 s from about 40 s; the last is daytime colours.
             sleep 5
-            end=$((SECONDS + 100)); i=0
+            end=$((SECONDS + 130)); i=0
             while [ $SECONDS -lt $end ]; do shot m$i; i=$((i + 1)); sleep 2; done
           elif [ "$LX_PREVIEW_FOCUS" = "pocket" ]; then
             # Sample pocket-money cards in the chat (no server; nothing is sent), then the transfer panel and the ledger page.
