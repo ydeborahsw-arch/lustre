@@ -278,7 +278,7 @@ enum LustreConfig {
         return (lx["previewFocus"] as? String) ?? ""
     }()
     /// 只拍一样东西、不许露真数据的预览路线(输入栏 / 样板气泡):首页自检和整套巡游都不跑
-    static var previewNarrow: Bool { previewFocus == "composer" || previewFocus == "bubbles" || previewFocus == "coread" || previewFocus == "watch" || previewFocus == "pocket" }
+    static var previewNarrow: Bool { previewFocus == "composer" || previewFocus == "bubbles" || previewFocus == "coread" || previewFocus == "watch" || previewFocus == "pocket" || previewFocus == "moments" }
 
     static var isPreview: Bool = {
         if let lx = config["lustre"] as? [String: Any], lx["preview"] as? Bool == true { return true }
@@ -3097,6 +3097,8 @@ enum LXNick {
     static var zhaoSet: String? { let v = cache["zhao"] ?? ""; return v.isEmpty ? nil : v }
     static var yanSet: String? { let v = cache["yan"] ?? ""; return v.isEmpty ? nil : v }
     static var zhao: String { zhaoSet ?? String(repeating: "__LX_ZHAO__", count: 2) }
+    /// 1005 她自己的名字(朋友圈里用):服务器上存着,App 不写死;没拉到过就空着
+    static var human: String { cache["human"] ?? "" }
     static var yan: String { yanSet ?? "__LX_YAN__" }
     /// 按会话认人:他那条线 / 昭这条(空或 __legacy__) / 其余新会话
     static func of(session sid: String) -> String {
@@ -3124,7 +3126,9 @@ enum LXNick {
     }
     private static func parse(_ data: Data?) -> [String: String]? {
         guard let data, let o = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { return nil }
-        return ["zhao": (o["zhao"] as? String) ?? "", "yan": (o["yan"] as? String) ?? ""]
+        var d = ["zhao": (o["zhao"] as? String) ?? "", "yan": (o["yan"] as? String) ?? ""]
+        if let h = o["human"] as? String { d["human"] = h }
+        return d
     }
     static func refresh() {
         guard let r = req("GET") else { return }

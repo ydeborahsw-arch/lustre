@@ -1,6 +1,7 @@
 import UIKit
 import QuickLook
 import WebKit
+import Photos
 
 
 final class LXLightbox: UIView, UIScrollViewDelegate {
@@ -9,20 +10,36 @@ final class LXLightbox: UIView, UIScrollViewDelegate {
     private let dim = UIView()
     private let spinner = UIActivityIndicatorView(style: .medium)
     private var dragStart: CGPoint = .zero
+    private let saveB = UIButton(type: .custom)   // 1005 她:大图都能存到相册(照网页 .lightbox-save)
+    private var origData: Data?                    // 拉到的原图文件:存相册存它(不再压一遍)
 
     static weak var live: LXLightbox?
 
-    static func show(_ url: URL, host: UIView) {
+    /// placeholder:手里已经有的小一号的图,先摆上,原图到了再换(朋友圈用)
+    static func show(_ url: URL, host: UIView, placeholder: UIImage? = nil) {
         live?.close(animated: false)
         let v = LXLightbox(frame: host.bounds)
         v.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         host.addSubview(v)
         LXStage.settle(host)
         live = v
-        v.load(url)
+        v.load(url, placeholder: placeholder)
         v.dim.alpha = 0
         v.scroll.alpha = 0
         UIView.animate(withDuration: 0.22) { v.dim.alpha = 1; v.scroll.alpha = 1 }
+    }
+
+    /// 手里已经有图(预览用的假图)
+    static func show(image: UIImage, host: UIView) {
+        live?.close(animated: false)
+        let v = LXLightbox(frame: host.bounds)
+        v.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        host.addSubview(v)
+        LXStage.settle(host)
+        live = v
+        v.iv.image = image
+        v.spinner.stopAnimating()
+        v.saveB.isHidden = false
     }
 
     override init(frame: CGRect) {
@@ -66,12 +83,60 @@ final class LXLightbox: UIView, UIScrollViewDelegate {
         pan.delegate = nil
         scroll.addGestureRecognizer(pan)
         pan.require(toFail: scroll.panGestureRecognizer)
+
+        // 存到相册:44 圆,rgba(255,255,255,.14) + 模糊 10,右下(安全区 + 14 / + 22);图出来了才露
+        saveB.layer.cornerRadius = 22
+        saveB.clipsToBounds = true
+        let fx = UIVisualEffectView(effect: UIBlurEffect(style: .systemUltraThinMaterialDark))
+        fx.frame = CGRect(x: 0, y: 0, width: 44, height: 44)
+        fx.isUserInteractionEnabled = false
+        fx.contentView.backgroundColor = UIColor(white: 1, alpha: 0.14)
+        saveB.addSubview(fx)
+        let ic = UIImageView(image: LXDrawerIcons.image("lb-save", [.path("M12 4v11"), .path("M8 11.5l4 4 4-4"), .path("M5 19.5h14")],
+                                                       size: 22, stroke: 1.9))
+        ic.tintColor = .white
+        ic.frame = CGRect(x: 11, y: 11, width: 22, height: 22)
+        ic.isUserInteractionEnabled = false
+        saveB.addSubview(ic)
+        saveB.isHidden = true
+        saveB.accessibilityLabel = "存到相册"
+        saveB.addTarget(self, action: #selector(onSave), for: .touchUpInside)
+        addSubview(saveB)
+    }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        let sa = safeAreaInsets
+        saveB.frame = CGRect(x: bounds.width - sa.right - 14 - 44, y: bounds.height - sa.bottom - 22 - 44, width: 44, height: 44)
+    }
+
+    @objc private func onSave() {
+        guard let img = iv.image else { return }
+        let data = origData
+        // 提示挂在窗口上:等她点完权限框,大图可能已经关了
+        weak var host: UIView? = window ?? superview
+        PHPhotoLibrary.requestAuthorization(for: .addOnly) { st in
+            guard st == .authorized || st == .limited else {
+                DispatchQueue.main.async { LXToast.show("存不了：去 设置 里允许 App 存照片", host: host) }
+                return
+            }
+            PHPhotoLibrary.shared().performChanges({
+                if let data {
+                    PHAssetCreationRequest.forAsset().addResource(with: .photo, data: data, options: nil)
+                } else {
+                    PHAssetChangeRequest.creationRequestForAsset(from: img)
+                }
+            }, completionHandler: { ok, _ in
+                DispatchQueue.main.async { LXToast.show(ok ? "已存到相册" : "没存上，再试一次", host: host) }
+            })
+        }
     }
     required init?(coder: NSCoder) { fatalError() }
 
-    private func load(_ url: URL) {
-        if let hit = LXAttImage.cache.object(forKey: url.absoluteString as NSString) {
-            iv.image = hit; spinner.stopAnimating(); return
+    private func load(_ url: URL, placeholder: UIImage? = nil) {
+        // 聊天缩略图的缓存是 144 的小图:先摆上,原图还是要拉(存相册要存原图,图拉到了才露存的键)
+        if let hit = placeholder ?? LXAttImage.cache.object(forKey: url.absoluteString as NSString) {
+            iv.image = hit; spinner.stopAnimating()
         }
         Task { [weak self] in
             guard let (d, resp) = try? await URLSession.shared.data(from: url),
@@ -82,7 +147,9 @@ final class LXLightbox: UIView, UIScrollViewDelegate {
             }
             await MainActor.run {
                 self?.iv.image = img
+                self?.origData = d
                 self?.spinner.stopAnimating()
+                self?.saveB.isHidden = false
             }
         }
     }

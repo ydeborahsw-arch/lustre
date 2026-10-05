@@ -5,9 +5,9 @@ on:
   workflow_dispatch:
     inputs:
       focus:
-        description: "tour = the full walk-through; composer = only the avatar-mode input bar; bubbles = a page of sample bubbles; coread = the reading room with a sample book; watch = the co-watch page on a public video with simulated progress; pocket = sample pocket-money cards, the transfer panel and the ledger page"
+        description: "tour = the full walk-through; composer = only the avatar-mode input bar; bubbles = a page of sample bubbles; coread = the reading room with a sample book; watch = the co-watch page on a public video with simulated progress; pocket = sample pocket-money cards, the transfer panel and the ledger page; moments = the moments page with sample posts (no server)"
         type: choice
-        options: [tour, composer, bubbles, coread, watch, pocket]
+        options: [tour, composer, bubbles, coread, watch, pocket, moments]
         default: tour
 
 env:
@@ -93,6 +93,12 @@ jobs:
             sleep 5
             end=$((SECONDS + 150)); i=0
             while [ $SECONDS -lt $end ]; do shot w$i; i=$((i + 1)); sleep 2; done
+          elif [ "$LX_PREVIEW_FOCUS" = "moments" ]; then
+            # The moments page with sample posts and coloured sample pictures (no server; nothing is sent).
+            # Six steps, 12 s each, starting about 6 s after the chat finishes loading.
+            sleep 5
+            end=$((SECONDS + 100)); i=0
+            while [ $SECONDS -lt $end ]; do shot m$i; i=$((i + 1)); sleep 2; done
           elif [ "$LX_PREVIEW_FOCUS" = "pocket" ]; then
             # Sample pocket-money cards in the chat (no server; nothing is sent), then the transfer panel and the ledger page.
             # Eight steps, 16 s each, starting about 6 s after the chat finishes loading.
