@@ -1030,8 +1030,7 @@ final class LXMomentsVC: UIViewController, UIScrollViewDelegate, PHPickerViewCon
         }
         meAva.layer.cornerRadius = 64 * 0.14
         meAva.clipsToBounds = true
-        meAva.contentMode = .scaleAspectFill
-        meAva.layer.borderWidth = 2.5
+        meAva.contentMode = .scaleAspectFill   // 不描边(1005 她:头像边上不该有黑框)
         let avaWrap = UIView()
         avaWrap.layer.shadowColor = UIColor.black.cgColor
         avaWrap.layer.shadowOpacity = 0.28
@@ -1180,7 +1179,6 @@ final class LXMomentsVC: UIViewController, UIScrollViewDelegate, PHPickerViewCon
     private func paint() {
         view.backgroundColor = LXMomentInk.bg
         stack.backgroundColor = LXMomentInk.bg
-        meAva.layer.borderColor = LXMomentInk.bg.cgColor
         meAva.image = LXAvatarStore.image("human")
         meAva.backgroundColor = LXMomentInk.humanBg
         emptyL.textColor = LXMomentInk.faint
