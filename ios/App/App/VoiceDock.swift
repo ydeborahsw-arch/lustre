@@ -1,8 +1,13 @@
 import UIKit
 import AVFoundation
 
+/// 输入框上面那条玻璃播放条。两种:聊天里的语音(LXVoiceBar),电台(LXRadioAudio,1005 她选 A:电台在放就一直挂在这)。
+/// 语音优先:点了语音电台先让位,语音完了电台那条回来(暂停着,点一下接着放)。
 final class LXVoiceDock: UIView {
     static var shared: LXVoiceDock?
+    private enum Mode { case voice, radio }
+    private var mode = Mode.voice
+    private var iconPaused: Bool?
     static let rates: [Float] = [1, 1.5, 2]
     static var rateIdx = 0
     static var currentRate: Float { rates[rateIdx] }
@@ -150,13 +155,14 @@ final class LXVoiceDock: UIView {
 
     static func sync() {
         DispatchQueue.main.async {
-            guard let bar = LXVoiceBar.playing, let player = LXVoiceBar.player,
-                  let host = NativeInputPlugin.live?.bridge?.viewController?.view else {
+            let voice = LXVoiceBar.playing != nil && LXVoiceBar.player != nil
+            let radio = !voice && LXRadioAudio.shared.item != nil
+            guard voice || radio, let host = NativeInputPlugin.live?.bridge?.viewController?.view else {
                 shared?.detach(); return
             }
             let d: LXVoiceDock
             if let s = shared, s.superview === host { d = s }
-            else { shared?.removeFromSuperview(); d = LXVoiceDock(); host.addSubview(d); shared = d
+            else { shared?.detach(); d = LXVoiceDock(); host.addSubview(d); shared = d
                    NSLayoutConstraint.activate([
                        d.leadingAnchor.constraint(equalTo: host.leadingAnchor, constant: 12),
                        d.trailingAnchor.constraint(equalTo: host.trailingAnchor, constant: -12),
@@ -165,17 +171,39 @@ final class LXVoiceDock: UIView {
             if let card = NativeInputPlugin.live?.card { d.transform = card.transform }
             host.bringSubviewToFront(d)
             LXStage.settle(host)
-            d.titleL.text = bar.title.components(separatedBy: " · ").first ?? "Lustre"
-            d.playB.setImage(UIImage(systemName: LXVoiceBar.paused ? "play.fill" : "pause.fill",
-                                     withConfiguration: UIImage.SymbolConfiguration(pointSize: 18, weight: .semibold)), for: .normal)
-            d.observe(player)
+            if voice, let bar = LXVoiceBar.playing, let player = LXVoiceBar.player {
+                d.mode = .voice
+                LXRadioAudio.shared.unlisten(d)
+                d.titleL.text = bar.title.components(separatedBy: " · ").first ?? "Lustre"
+                d.subL.text = "Voice message"
+                d.rateB.isHidden = false
+                d.setPlayIcon(paused: LXVoiceBar.paused)
+                d.observe(player)
+            } else if let it = LXRadioAudio.shared.item {
+                d.mode = .radio
+                d.stopObserving()
+                d.titleL.text = it.title.isEmpty ? "Untitled" : it.title
+                d.subL.text = "Radio"
+                d.rateB.isHidden = true   // 电台不调速
+                LXRadioAudio.shared.listen(d) { [weak d] in d?.tick() }
+            }
             d.reanchor(host: host)
             d.tick()
         }
     }
-    private func detach() {
+    private func setPlayIcon(paused: Bool) {
+        guard iconPaused != paused else { return }
+        iconPaused = paused
+        playB.setImage(UIImage(systemName: paused ? "play.fill" : "pause.fill",
+                               withConfiguration: UIImage.SymbolConfiguration(pointSize: 18, weight: .semibold)), for: .normal)
+    }
+    private func stopObserving() {
         if let p = observedPlayer, let o = timeObs { p.removeTimeObserver(o) }
         timeObs = nil; observedPlayer = nil
+    }
+    private func detach() {
+        stopObserving()
+        LXRadioAudio.shared.unlisten(self)
         removeFromSuperview()
         Self.shared = nil
     }
@@ -203,6 +231,15 @@ final class LXVoiceDock: UIView {
     private func tick() {
         guard let host = superview else { return }
         reanchor(host: host)
+        if mode == .radio {
+            let a = LXRadioAudio.shared
+            guard a.item != nil else { return }   // 电台停了:sync 会把条收走
+            setPlayIcon(paused: !a.playing)
+            guard !scrubbing else { return }
+            let w = track.bounds.width * CGFloat(a.length > 0 ? min(1, a.elapsed / a.length) : 0)
+            if abs(fillW.constant - w) > 0.5 { fillW.constant = w }
+            return
+        }
         guard !scrubbing, let p = observedPlayer, let item = p.currentItem else { return }
         let d = item.duration.seconds
         guard d.isFinite, d > 0 else { fillW.constant = 0; return }
@@ -212,9 +249,13 @@ final class LXVoiceDock: UIView {
 
 
     @objc private func playTap() {
+        if mode == .radio { LXRadioAudio.shared.toggle(); return }
         if LXVoiceBar.paused { LXVoiceBar.resume() } else { LXVoiceBar.pause() }
     }
-    @objc private func closeTap() { LXVoiceBar.stopAll() }
+    @objc private func closeTap() {
+        if mode == .radio { LXRadioAudio.shared.stop(); return }
+        LXVoiceBar.stopAll()
+    }
     @objc private func rateTap() {
         Self.rateIdx = (Self.rateIdx + 1) % Self.rates.count
         refreshRateLabel()
@@ -226,6 +267,14 @@ final class LXVoiceDock: UIView {
         rateB.setTitle(r == r.rounded() ? "\(Int(r))X" : String(format: "%.1fX", r), for: .normal)
     }
     private func seek(toX x: CGFloat) {
+        if mode == .radio {
+            let a = LXRadioAudio.shared
+            guard a.length > 0 else { return }
+            let f = max(0, min(1, (x - track.frame.minX) / max(1, track.bounds.width)))
+            fillW.constant = track.bounds.width * f
+            a.seek(to: a.length * Double(f))
+            return
+        }
         guard let p = observedPlayer, let item = p.currentItem else { return }
         let d = item.duration.seconds
         guard d.isFinite, d > 0 else { return }
@@ -244,5 +293,6 @@ final class LXVoiceDock: UIView {
     @objc private func scrubTap(_ g: UITapGestureRecognizer) {
         let pt = g.location(in: self)
         if pt.y > bounds.height - 22 { seek(toX: pt.x) }
+        else if mode == .radio { LXRadioPlayerVC.open() }   // 点节目名:回到文字亮的那页
     }
 }

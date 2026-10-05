@@ -148,6 +148,7 @@ final class LXRadioAudio: NSObject {
         length = Double(it.duration)
         let resumeAt = savedPosition(it)
         elapsed = resumeAt
+        LXVoiceDock.sync()
         if LustreConfig.isPreview {
             playing = true
             fake = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
@@ -311,7 +312,10 @@ final class LXRadioAudio: NSObject {
     func refresh(_ list: [LXRadioItem]) {
         queue = list
         if let it = item {
-            if let n = list.first(where: { $0.id == it.id }) { item = n; pushNowPlaying(); tell() }
+            if let n = list.first(where: { $0.id == it.id }) {
+                if n.title != it.title { LXVoiceDock.sync() }
+                item = n; pushNowPlaying(); tell()
+            }
             else { stop() }
         }
     }
@@ -319,6 +323,7 @@ final class LXRadioAudio: NSObject {
     func stop() {
         teardown(savePosition: true)
         item = nil
+        LXVoiceDock.sync()
         tell()
     }
 
@@ -329,6 +334,7 @@ final class LXRadioAudio: NSObject {
         } else {
             teardown(savePosition: false)
             item = nil
+            LXVoiceDock.sync()
             tell()
         }
     }
@@ -826,6 +832,15 @@ final class LXRadioVC: UIViewController {
 final class LXRadioPlayerVC: UIViewController, UIScrollViewDelegate {
     static weak var live: LXRadioPlayerVC?
 
+    /// 聊天里那条电台播放条点中间:从最上面那页弹出来,关了回到原处
+    static func open() {
+        guard LXRadioAudio.shared.item != nil, live?.presentingViewController == nil,
+              let top = DrawerPlugin.topVC() else { return }
+        let vc = LXRadioPlayerVC()
+        vc.modalPresentationStyle = .fullScreen
+        top.present(vc, animated: true)
+    }
+
     private let downBtn = UIButton(type: .custom)
     private let titleL = UILabel()
     private let metaL = UILabel()
@@ -1151,13 +1166,20 @@ enum LXRadioPreview {
                 LXRadioPlayerVC.live?.dismiss(animated: false)
                 vc.previewRepaint()
             }),
+            (.green, {                                     // 关掉电台页回聊天:输入框上面那条电台播放条(这条路线聊天里不画消息)
+                LXRadioAudio.shared.seek(to: 10)
+                LXRadioAudio.shared.resume()
+                vc.dismiss(animated: false)
+            }),
         ]
         for (i, st) in steps.enumerated() {
             DispatchQueue.main.asyncAfter(deadline: .now() + (i == 0 ? 0.5 : 40 + Double(i - 1) * 12)) {
                 st.1()
                 phase.backgroundColor = st.0
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
-                    let host: UIView = (LXRadioPlayerVC.live?.presentingViewController != nil ? LXRadioPlayerVC.live?.view : nil) ?? vc.view
+                    let host: UIView = (LXRadioPlayerVC.live?.presentingViewController != nil ? LXRadioPlayerVC.live?.view : nil)
+                        ?? (vc.presentingViewController != nil ? vc.view : nil)
+                        ?? NativeInputPlugin.live?.bridge?.viewController?.view ?? vc.view
                     for v in [mark, phase] { if v.superview !== host { host.addSubview(v) }; host.bringSubviewToFront(v) }
                 }
             }

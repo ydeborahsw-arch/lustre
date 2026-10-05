@@ -440,8 +440,8 @@ final class LXChatData {
         return m.session == session
     }
     private func renderable(_ m: LXMsg) -> Bool {
-        // 预览 pocket 路线:屏幕上只放样板卡,真聊天一条都不露
-        if Self.pocketPreview, !pocketDemoIds.contains(m.id) { return false }
+        // 预览 pocket 路线:屏幕上只放样板卡,真聊天一条都不露(radio 路线一条都不放)
+        if Self.blankChatPreview, !pocketDemoIds.contains(m.id) { return false }
         // 零花钱只画卡;没有 meta.pocket 的不退回成普通气泡
         if m.kind == "transfer" || m.kind == "spend" { return m.pocket != nil }
         if m.kind == "thinking" { return !m.text.isEmpty }
@@ -569,6 +569,8 @@ final class LXChatData {
 
     /// 1003 预览 pocket 路线(只拍零花钱卡)
     static var pocketPreview: Bool { LustreConfig.isPreview && LustreConfig.previewFocus == "pocket" }
+    /// 这几条预览路线会拍到聊天页:真消息、正在想、正在打的字都不画
+    static var blankChatPreview: Bool { pocketPreview || (LustreConfig.isPreview && LustreConfig.previewFocus == "radio") }
     private var pocketDemoIds = Set<Int64>()
 
     /// 预览 pocket 路线的六张样板:她给他的(已被收)/ 他那边的已收款 / 他回一句 / 他花了 / 他转给她(待收)/ 她转给他(待收,没写备注)
@@ -1096,7 +1098,7 @@ final class LXChatData {
         let allVisible = mergeTurnThinking(order.compactMap { idx[$0] }.filter { inSession($0) && renderable($0) })
         lastVisible = allVisible
         let visible = thinkInSheet ? allVisible.filter { $0.kind != "thinking" } : allVisible
-        let liveActive = (!thinkDraft.isEmpty || thinkStart != nil) && !thinkInSheet && !Self.pocketPreview
+        let liveActive = (!thinkDraft.isEmpty || thinkStart != nil) && !thinkInSheet && !Self.blankChatPreview
         var liveAt: Int? = nil
         for (i, m) in visible.enumerated() {
             if liveActive, liveAt == nil, m.id > liveThinkStartId, m.kind != "thinking" { liveAt = out.count }
@@ -1138,7 +1140,7 @@ final class LXChatData {
             out.insert(contentsOf: liveRows, at: at)
             liveRowIdx = at
         }
-        if !draft.isEmpty, !Self.pocketPreview {
+        if !draft.isEmpty, !Self.blankChatPreview {
             out.append(.msg(LXMsg(id: .max, from: "ai", kind: "reply",
                                   text: String(draft.prefix(draftShown)),
                                   ts: Date(), session: session, attCount: 0), showTime: false, tail: true, grouped: false, afterThink: false))

@@ -101,9 +101,10 @@ jobs:
             while [ $SECONDS -lt $end ]; do shot m$i; i=$((i + 1)); sleep 2; done
           elif [ "$LX_PREVIEW_FOCUS" = "radio" ]; then
             # The radio list and player with sample shows (no server, no sound; the clock is simulated).
-            # Five steps: the first is on from the moment the page opens, then one every 12 s from about 40 s.
+            # Six steps: the first is on from the moment the page opens, then one every 12 s from about 40 s.
+            # The last one closes the radio page: the chat (with no messages drawn) and the radio bar above the input.
             sleep 5
-            end=$((SECONDS + 110)); i=0
+            end=$((SECONDS + 130)); i=0
             while [ $SECONDS -lt $end ]; do shot r$i; i=$((i + 1)); sleep 2; done
           elif [ "$LX_PREVIEW_FOCUS" = "pocket" ]; then
             # Sample pocket-money cards in the chat (no server; nothing is sent), then the transfer panel and the ledger page.
