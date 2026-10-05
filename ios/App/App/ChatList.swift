@@ -624,6 +624,7 @@ final class LXChatData {
             else if LustreConfig.previewFocus == "coread" { LXCRPreview.start() }
             else if LustreConfig.previewFocus == "watch" { LXWatchPreview.start() }
             else if LustreConfig.previewFocus == "moments" { LXMomentsPreview.start() }
+            else if LustreConfig.previewFocus == "radio" { LXRadioPreview.start() }
             else { ChatListPlugin.live?.previewAvaTimeCheck() }
         }
         let base = (msgs.last?.id ?? 0) + 1000
@@ -1241,6 +1242,7 @@ final class LXChatData {
         if LXCallSession.shared.isActive { LXCallSession.shared.feed(obj) }
         LXWatchVC.feed(obj)     // 1003 共看:页面开着时他的回复飘成弹幕
         LXMomentsVC.feed(obj)   // 1005 朋友圈:谁发了、赞了、评论了,页面上实时冒出来
+        LXRadioVC.feed(obj)     // 1005 电台:新节目、量好了时间、被拿掉
         if obj["type"] == nil, obj["id"] is NSNumber, obj["from"] is String {
             guard let m = Self.parse(obj) else { return }
             // 1001 别的线来的:不进这页,只给侧边栏记一笔没看的
@@ -4363,6 +4365,7 @@ final class LXVoiceBar: UIControl {
     @objc private func toggle() {
         if Self.playing === self { if Self.paused { Self.resume() } else { Self.pause() }; return }
         Self.stopAll()
+        LXRadioAudio.shared.yieldToVoice()   // 1005 电台在放:先让位(位置记住)
         guard let u = att.fullURL else { return }
         try? AVAudioSession.sharedInstance().setCategory(.playback)
         try? AVAudioSession.sharedInstance().setActive(true)
@@ -4403,7 +4406,8 @@ final class LXVoiceBar: UIControl {
         player?.pause(); player = nil
         playing?.setPlaying(false); playing?.resetFill(); playing = nil
         paused = false
-        MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
+        // 电台在放:锁屏那张归电台,别清掉
+        if LXRadioAudio.current { LXRadioAudio.shared.pushNowPlaying() } else { MPNowPlayingInfoCenter.default().nowPlayingInfo = nil }
         LXVoiceDock.sync()
     }
 
@@ -4448,7 +4452,10 @@ final class LXVoiceBar: UIControl {
         p.play(); p.rate = LXVoiceDock.currentRate; paused = false; bar.setPlaying(true); pushNowPlaying(); return true
     }
     static func pushNowPlaying() {
-        guard let p = player, let bar = playing else { MPNowPlayingInfoCenter.default().nowPlayingInfo = nil; return }
+        guard let p = player, let bar = playing else {
+            if LXRadioAudio.current { LXRadioAudio.shared.pushNowPlaying() } else { MPNowPlayingInfoCenter.default().nowPlayingInfo = nil }
+            return
+        }
         var info: [String: Any] = [MPMediaItemPropertyTitle: bar.title, MPMediaItemPropertyArtist: "Lustre",
                                    MPNowPlayingInfoPropertyMediaType: MPNowPlayingInfoMediaType.audio.rawValue]
         if let d = p.currentItem?.duration.seconds, d.isFinite, d > 0 { info[MPMediaItemPropertyPlaybackDuration] = d }
@@ -4461,20 +4468,25 @@ final class LXVoiceBar: UIControl {
         LXVoiceDock.sync()
     }
     private static var remoteWired = false
-    private static func wireRemote() {
+    /// 锁屏 / 耳机按键全 App 只接这一套:电台在放先归电台(LXRadioAudio.remote 返回 nil 才轮到语音条)
+    static func wireRemote() {
         guard !remoteWired else { return }
         remoteWired = true
         let c = MPRemoteCommandCenter.shared()
-        c.playCommand.addTarget { _ in resume() ? .success : .commandFailed }
-        c.pauseCommand.addTarget { _ in pause() ? .success : .commandFailed }
-        c.togglePlayPauseCommand.addTarget { _ in (paused ? resume() : pause()) ? .success : .commandFailed }
+        c.playCommand.addTarget { _ in LXRadioAudio.remote("play") ?? (resume() ? .success : .commandFailed) }
+        c.pauseCommand.addTarget { _ in LXRadioAudio.remote("pause") ?? (pause() ? .success : .commandFailed) }
+        c.togglePlayPauseCommand.addTarget { _ in LXRadioAudio.remote("toggle") ?? ((paused ? resume() : pause()) ? .success : .commandFailed) }
         c.changePlaybackPositionCommand.addTarget { ev in
-            guard let e = ev as? MPChangePlaybackPositionCommandEvent, let p = player else { return .commandFailed }
+            guard let e = ev as? MPChangePlaybackPositionCommandEvent else { return .commandFailed }
+            if let r = LXRadioAudio.remote("seek", e.positionTime) { return r }
+            guard let p = player else { return .commandFailed }
             p.seek(to: CMTime(seconds: e.positionTime, preferredTimescale: 600)) { _ in pushNowPlaying() }
             return .success
         }
-        c.nextTrackCommand.isEnabled = false
-        c.previousTrackCommand.isEnabled = false
+        c.nextTrackCommand.addTarget { _ in LXRadioAudio.remote("next") ?? .commandFailed }
+        c.previousTrackCommand.addTarget { _ in LXRadioAudio.remote("prev") ?? .commandFailed }
+        c.nextTrackCommand.isEnabled = LXRadioAudio.current
+        c.previousTrackCommand.isEnabled = LXRadioAudio.current
         c.skipForwardCommand.isEnabled = false
         c.skipBackwardCommand.isEnabled = false
         UIApplication.shared.beginReceivingRemoteControlEvents()
@@ -4689,6 +4701,12 @@ final class LXMsgMenu: UIView {
                 line([(4, 7), (20, 7)])
                 line([(4, 12), (20, 12)])
                 line([(4, 17), (13, 17)])
+            case "radio":
+                rrect(3, 8, 18, 12, 2.4)
+                line([(7.5, 8), (16, 3.5)])
+                c.addEllipse(in: CGRect(x: 12.5 * s, y: 11.5 * s, width: 5 * s, height: 5 * s)); c.strokePath()
+                line([(6.5, 12.5), (9.5, 12.5)])
+                line([(6.5, 15.5), (9.5, 15.5)])
             case "multi":
                 rrect(4, 4, 7, 7, 1.6)
                 rrect(13, 13, 7, 7, 1.6)
@@ -4836,6 +4854,7 @@ final class LXMsgMenu: UIView {
         let voice = LXBubbleCell.isVoice(msg)
         if voice {
             items.append(("stt", LXBubbleCell.voiceOpen.contains(msg.id) ? "收起文字" : "转文字", fg))
+            if msg.from == "ai" { items.append(("radio", "放进电台", fg)) }   // 1005 她的单:长按他的语音放进电台
         }
         if !msg.text.isEmpty && (!voice || LXBubbleCell.voiceOpen.contains(msg.id)) {
             items.append(("seltext", "Select text", fg))
@@ -7713,6 +7732,8 @@ public class ChatListPlugin: CAPPlugin, CAPBridgedPlugin, UITableViewDataSource,
         case "stt":
             if m.text.isEmpty { toast("这条还没转出文字"); return }
             toggleVoiceText(m.id)
+        case "radio":
+            LXRadioNet.add(msgId: m.id) { [weak self] ok in self?.toast(ok ? "放进电台了" : "没放进去，再试一次") }
         case "copy":
             guard !m.text.isEmpty else { return }
             UIPasteboard.general.string = m.text

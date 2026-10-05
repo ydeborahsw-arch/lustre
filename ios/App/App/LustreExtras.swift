@@ -278,7 +278,7 @@ enum LustreConfig {
         return (lx["previewFocus"] as? String) ?? ""
     }()
     /// 只拍一样东西、不许露真数据的预览路线(输入栏 / 样板气泡):首页自检和整套巡游都不跑
-    static var previewNarrow: Bool { previewFocus == "composer" || previewFocus == "bubbles" || previewFocus == "coread" || previewFocus == "watch" || previewFocus == "pocket" || previewFocus == "moments" }
+    static var previewNarrow: Bool { previewFocus == "composer" || previewFocus == "bubbles" || previewFocus == "coread" || previewFocus == "watch" || previewFocus == "pocket" || previewFocus == "moments" || previewFocus == "radio" }
 
     static var isPreview: Bool = {
         if let lx = config["lustre"] as? [String: Any], lx["preview"] as? Bool == true { return true }
@@ -2838,6 +2838,7 @@ public class NativeInputPlugin: CAPPlugin, CAPBridgedPlugin, UITextViewDelegate 
             DispatchQueue.main.async {
                 guard let self else { return }
                 guard granted else { self.notifyListeners("recDenied", data: [:]); self.micDeniedToast(); return }
+                LXRadioAudio.yieldToMic()
                 do {
                     try sess.setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker, .allowBluetooth])
                     try sess.setActive(true)

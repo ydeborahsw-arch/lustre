@@ -183,6 +183,7 @@ enum LXDrawerIcons {
                   .path("M3 13c1.8-2.2 3.6-2.2 5.4 0s3.6 2.2 5.4 0 3.6-2.2 5.4 0"),
                   .path("M3 17.5c1.8-2.2 3.6-2.2 5.4 0s3.6 2.2 5.4 0 3.6-2.2 5.4 0")],
         "room": [.path("M5 21V9a7 7 0 0 1 14 0v12"), .path("M4 21h16"), .circle(15, 13, 0.95, fill: true)],
+        "radio": [.rect(3, 8, 18, 12, 2.4), .path("M7.5 8l8.5-4.5"), .circle(15, 14, 2.5), .path("M6.5 12.5h3M6.5 15.5h3")],
     ]
     static let strokeOf: [String: CGFloat] = ["memory": 1.5]
     static let gear: [LXSVG.Part] = [
@@ -276,13 +277,13 @@ struct LXDrawerSpec {
     var items: [(menu: String, name: String)] = [
         ("moments", "Moments"), ("archive", "Archive"),
         ("calls", "Call log"), ("artifacts", "Artifacts"),
-        ("gallery", "Gallery"), ("memory", "Memory"), ("library", "Library"), ("watch", "Watch"), ("pocket", "Pocket"), ("terminal", "Terminal"),
+        ("gallery", "Gallery"), ("memory", "Memory"), ("library", "Library"), ("watch", "Watch"), ("pocket", "Pocket"), ("radio", "Radio"), ("terminal", "Terminal"),
     ]
     var sessions: [(sid: String, title: String, active: Bool, pinned: Bool, cat: String)] = []
     var hasAva = false
     var sig = "default"
 
-    static let nativeMenus: Set<String> = ["moments", "calls", "artifacts", "terminal", "archive", "library", "watch", "pocket"]   // 1001 共读原生化后 Library 回到抽屉;1003 共看 Watch、零花钱 Pocket;1005 朋友圈 Moments
+    static let nativeMenus: Set<String> = ["moments", "calls", "artifacts", "terminal", "archive", "library", "watch", "pocket", "radio"]   // 1001 共读原生化后 Library 回到抽屉;1003 共看 Watch、零花钱 Pocket;1005 朋友圈 Moments、电台 Radio
 
     static let key = "lx.drawer.spec"
     static func from(_ d: [String: Any]) -> LXDrawerSpec {
@@ -1400,7 +1401,7 @@ public class DrawerPlugin: CAPPlugin, CAPBridgedPlugin {
         CAPPluginMethod(name: "drawerStatus", returnType: CAPPluginReturnPromise),
     ]
     static weak var live: DrawerPlugin?
-    private static let overlayMenus: Set<String> = ["moments", "timemachine", "archive", "gallery", "memory", "library", "watch", "pocket", "terminal", "album"]
+    private static let overlayMenus: Set<String> = ["moments", "timemachine", "archive", "gallery", "memory", "library", "watch", "pocket", "radio", "terminal", "album"]
 
     public override func load() {
         Self.live = self
@@ -1429,6 +1430,10 @@ public class DrawerPlugin: CAPPlugin, CAPBridgedPlugin {
             }
             if act == "menu", arg == "moments", LustreConfig.webless {
                 LXMomentsVC.open()
+                return
+            }
+            if act == "menu", arg == "radio", LustreConfig.webless {
+                LXRadioVC.open()
                 return
             }
             if act == "menu", arg == "terminal", LustreConfig.webless {

@@ -103,6 +103,7 @@ final class LXWatchRec {
     }
 
     private func setSession() throws {
+        LXRadioAudio.yieldToMic()
         let ses = AVAudioSession.sharedInstance()
         try ses.setCategory(.playAndRecord, mode: .voiceChat, options: [.defaultToSpeaker, .allowBluetooth])
         try ses.setActive(true)

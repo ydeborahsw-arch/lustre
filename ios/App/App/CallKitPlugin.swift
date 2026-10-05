@@ -112,6 +112,7 @@ final class LXCallCenter: NSObject, PKPushRegistryDelegate, CXProviderDelegate {
         if u == nil { activeInfo = [:] }
     }
     func provider(_ provider: CXProvider, perform action: CXStartCallAction) {
+        LXRadioAudio.yieldToMic()
         let session = AVAudioSession.sharedInstance()
         try? session.setCategory(.playAndRecord, mode: .voiceChat, options: [.allowBluetooth, .defaultToSpeaker])
         action.fulfill()
@@ -124,6 +125,7 @@ final class LXCallCenter: NSObject, PKPushRegistryDelegate, CXProviderDelegate {
     }
     func provider(_ provider: CXProvider, perform action: CXAnswerCallAction) {
         ringTimer?.invalidate()
+        LXRadioAudio.yieldToMic()
         let session = AVAudioSession.sharedInstance()
         try? session.setCategory(.playAndRecord, mode: .voiceChat, options: [.allowBluetooth, .defaultToSpeaker])
         let already = answered
@@ -375,6 +377,7 @@ final class LXCallSession: NSObject, AVAudioPlayerDelegate {
 
     private func beginAudio() {
         guard active else { return }
+        LXRadioAudio.yieldToMic()
         let ses = AVAudioSession.sharedInstance()
         try? ses.setCategory(.playAndRecord, mode: .voiceChat, options: [.allowBluetooth, .defaultToSpeaker])
         if !viaCallKit { try? ses.setActive(true) }
