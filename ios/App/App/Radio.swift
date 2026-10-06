@@ -19,6 +19,7 @@ struct LXRadioItem {
     let cues: [Cue]
     let status: String      // aligning / ready
     let ts: String
+    let msgTs: String       // 语音原来是哪天发的(放进电台那天是 ts);列表上的日期用这个
 
     init?(_ d: [String: Any]) {
         guard let id = (d["id"] as? NSNumber)?.intValue, let file = d["file"] as? String else { return nil }
@@ -34,11 +35,12 @@ struct LXRadioItem {
         }
         status = (d["status"] as? String) ?? "ready"
         ts = (d["ts"] as? String) ?? ""
+        msgTs = (d["msg_ts"] as? String) ?? ""
     }
 
     var dict: [String: Any] {
         ["id": id, "title": title, "source": source, "file": file, "duration": duration, "text": text,
-         "cues": cues.map { ["t": $0.t, "s": $0.s] as [String: Any] }, "status": status, "ts": ts]
+         "cues": cues.map { ["t": $0.t, "s": $0.s] as [String: Any] }, "status": status, "ts": ts, "msg_ts": msgTs]
     }
 
     /// 播放页显示的行:有时间就按时间那一版;还没量出来就按文字切行(不亮)
@@ -51,7 +53,7 @@ struct LXRadioItem {
         let kind = source == "voice" ? "Voice note" : "Show"
         var parts = [kind]
         if duration > 0 { parts.append(LXRadioAudio.clock(Double(duration))) }
-        if let d = LXRadioItem.parse(ts) { parts.append(LXRadioItem.dayF.string(from: d)) }
+        if let d = LXRadioItem.parse(msgTs.isEmpty ? ts : msgTs) { parts.append(LXRadioItem.dayF.string(from: d)) }
         return parts.joined(separator: " · ")
     }
 
