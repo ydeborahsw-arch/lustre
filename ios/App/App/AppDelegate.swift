@@ -52,6 +52,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { lustreKillAccessoryBars() }
         BackgroundSync.shared.register()
         BackgroundSync.shared.schedule()
+        MirrorSync.shared.startAuto()   // 手机里那份镜像跟着服务器自动补(规矩见 MirrorSync)
         if !LustreConfig.isPreview {
             HealthWatch.note("launch", HealthWatch.envTag())
             HealthWatch.shared.start()

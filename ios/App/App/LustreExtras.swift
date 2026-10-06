@@ -8,6 +8,7 @@ import BackgroundTasks
 import HealthKit
 import WebKit
 import AVFoundation
+import Network
 
 
 enum QuickAction {
@@ -295,6 +296,7 @@ final class MirrorSync {
     static let shared = MirrorSync()
     static let lastKey = "lustre.mirror.last"
     private(set) var running = false
+    private(set) var waitingWiFi = false   // 自动同步因为在用流量、要下的又多,这次没下
 
     var dir: URL {
         let d = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
@@ -313,7 +315,8 @@ final class MirrorSync {
         }
         return ["bytes": total,
                 "last": UserDefaults.standard.double(forKey: MirrorSync.lastKey),
-                "running": running]
+                "running": running,
+                "waiting": waitingWiFi]
     }
 
     private func req(_ path: String) -> URLRequest? {
@@ -323,7 +326,8 @@ final class MirrorSync {
         return r
     }
 
-    func run(progress: @escaping (String) -> Void, done: @escaping (Bool, String) -> Void) {
+    /// bigOK = false(自动同步碰上流量):这次要下的超过 30MB 就先不下,等 WiFi
+    func run(bigOK: Bool = true, progress: @escaping (String) -> Void, done: @escaping (Bool, String) -> Void) {
         guard !running else { done(false, "already running"); return }
         running = true
         guard let mreq = req("/app/mirror/manifest") else { running = false; done(false, "no config"); return }
@@ -333,8 +337,74 @@ final class MirrorSync {
                   let files = obj["files"] as? [[String: Any]] else {
                 self.running = false; done(false, "manifest failed"); return
             }
+            if !bigOK, self.pendingBytes(files) > Self.bigBytes {
+                self.waitingWiFi = true
+                self.running = false; done(false, "waiting for Wi-Fi"); return
+            }
+            self.waitingWiFi = false
             self.step(files, 0, 0, progress, done)
         }.resume()
+    }
+
+    // ── 自动同步(1006 她:"改原生之后也要一直跟着更新啊")──
+    // 9-25 换原生以后没人叫镜像跑了(以前是网页里的 autoMirror 叫),手机那份停了 11 天。规矩照网页版搬:
+    // 首拉做过(last≠0,第一次整份下载她自己连 WiFi 点)/ 离上次 ≥30 分钟 / App 连着开满 90 秒才动(躲开开面那几秒的内存尖峰,0920 那次崩溃)。
+    // 网页版只在回前台时问一次;这里开着不走也每 5 分钟问一次。原生多一道:要下的超过 30MB 又在用流量(蜂窝、热点、低数据模式)就等 WiFi。
+    private static let bigBytes: Int64 = 30 * 1024 * 1024
+    private var autoTimer: Timer?
+    private var lastKick: TimeInterval = 0
+    private var onCellular = true          // 网络还没测出来前按流量算
+    private let netMon = NWPathMonitor()
+
+    func startAuto() {
+        netMon.pathUpdateHandler = { [weak self] p in self?.onCellular = p.isExpensive || p.isConstrained }
+        netMon.start(queue: .main)
+        let nc = NotificationCenter.default
+        nc.addObserver(forName: UIApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
+            self?.arm(after: 92)
+        }
+        nc.addObserver(forName: UIApplication.willResignActiveNotification, object: nil, queue: .main) { [weak self] _ in
+            self?.autoTimer?.invalidate()
+            self?.autoTimer = nil
+        }
+        if UIApplication.shared.applicationState == .active { arm(after: 92) }
+    }
+
+    private func arm(after s: TimeInterval) {
+        autoTimer?.invalidate()
+        autoTimer = Timer.scheduledTimer(withTimeInterval: s, repeats: false) { [weak self] _ in self?.autoKick() }
+    }
+
+    private func autoKick() {
+        autoTimer = nil
+        guard UIApplication.shared.applicationState == .active else { return }
+        arm(after: 300)
+        guard !running, !LustreConfig.isPreview else { return }
+        let now = Date().timeIntervalSince1970
+        let last = UserDefaults.standard.double(forKey: Self.lastKey)
+        guard last > 0, now - last >= 1800, now - lastKick >= 1800 else { return }
+        lastKick = now
+        run(bigOK: !onCellular, progress: { _ in }, done: { [weak self] ok, _ in
+            // 没跑成(等 WiFi、服务器没回):别等半小时,5 分钟后那一问再试
+            if !ok { DispatchQueue.main.async { self?.lastKick = 0 } }
+        })
+    }
+
+    /// 这次要下多少:只往后加的按缺的尾巴算,整份换的按整份算(跟 step 里判断跳不跳一个口径)
+    private func pendingBytes(_ files: [[String: Any]]) -> Int64 {
+        var sum: Int64 = 0
+        for f in files {
+            let fid = (f["id"] as? String) ?? ""
+            let size = ((f["size"] as? NSNumber)?.int64Value) ?? 0
+            let mtime = ((f["mtime"] as? NSNumber)?.doubleValue) ?? 0
+            let safe = fid.components(separatedBy: "/").filter { $0 != ".." && !$0.isEmpty }.joined(separator: "/")
+            let local = dir.appendingPathComponent(safe)
+            let exists = FileManager.default.fileExists(atPath: local.path)
+            let have = ((try? FileManager.default.attributesOfItem(atPath: local.path))?[.size] as? NSNumber)?.int64Value ?? 0
+            if isAppendOnly(fid) { sum += have > size ? size : size - have }
+            else if !(exists && have == size && savedMtime(fid) == mtime) { sum += size }
+        }
+        return sum
     }
 
     private func step(_ files: [[String: Any]], _ i: Int, _ grabbed: Int64,

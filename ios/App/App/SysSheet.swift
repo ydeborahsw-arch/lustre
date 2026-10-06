@@ -835,10 +835,12 @@ enum LXSysNative {
                 let mb = Double((m["bytes"] as? Int64) ?? 0) / 1048576
                 let last = (m["last"] as? Double) ?? 0
                 let running = (m["running"] as? Bool) ?? false
+                let waiting = (m["waiting"] as? Bool) ?? false
                 let size = mb >= 1024 ? String(format: "%.1f GB", mb / 1024) : "\(Int(mb.rounded())) MB"
                 rows.append(row("app:mirror", "mirror", "Local mirror",
                                 val: running ? "Syncing…" : (mb > 0 ? size : "Off"),
-                                sub: "Tap to sync · last " + (last > 0 ? whenShort(Date(timeIntervalSince1970: last)) : "never"),
+                                sub: "Tap to sync · last " + (last > 0 ? whenShort(Date(timeIntervalSince1970: last)) : "never")
+                                    + (waiting && !running ? " · waiting for Wi-Fi" : ""),
                                 on: mb > 0))
                 app = rows; g.leave()
             }
