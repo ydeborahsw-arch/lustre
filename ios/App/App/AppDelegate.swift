@@ -101,6 +101,11 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
 
     func application(_ application: UIApplication, handleEventsForBackgroundURLSession identifier: String,
                      completionHandler: @escaping () -> Void) {
+        if identifier == MirrorSync.sessionId {   // 1008:镜像在后台下完了,系统叫醒 App 交货
+            MirrorSync.shared.bgDone = completionHandler
+            MirrorSync.shared.wake()
+            return
+        }
         guard identifier == LXUploader.sessionId else { completionHandler(); return }
         LXUploader.shared.bgDone = completionHandler
         LXUploader.shared.wake()

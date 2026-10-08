@@ -223,6 +223,20 @@ final class LXSysRowView: UIControl {
         chevV.tintColor = t.faint
         dotV.backgroundColor = row.dot == "on" ? t.accent : t.dotOff
     }
+
+    /// 1008 镜像进度:只换这一行的字,整张不重建(重建会闪)
+    func setText(val: String, sub: String) {
+        if valL.text != val {
+            valL.text = val
+            valL.isHidden = val.isEmpty
+        }
+        if subL.attributedText?.string != sub {
+            let ps = NSMutableParagraphStyle(); ps.minimumLineHeight = 15; ps.maximumLineHeight = 15
+            subL.attributedText = NSAttributedString(string: sub, attributes: [.paragraphStyle: ps, .font: LXDrawerTint.font(12),
+                                                                               .foregroundColor: tint.faint])
+            subL.isHidden = sub.isEmpty
+        }
+    }
 }
 
 
@@ -365,6 +379,11 @@ final class LXSysSheetView: UIView {
         guard s.sig != spec.sig || rows.isEmpty else { return }
         spec = s
         rebuild()
+    }
+
+    /// 只改某一行的字(镜像下载进度一直在变):原地换,不走 rebuild
+    func patch(_ sel: String, val: String, sub: String) {
+        rows.first { $0.row.sel == sel }?.setText(val: val, sub: sub)
     }
     func retheme() { tint = LXSysTint.cur(); recolor() }
 
@@ -636,7 +655,15 @@ public class SysPlugin: CAPPlugin, CAPBridgedPlugin {
         DispatchQueue.main.async { self.openPage(kind); call.resolve(["ok": self.page != nil]) }
     }
 
-    public override func load() { Self.live = self }
+    public override func load() {
+        Self.live = self
+        // 镜像在后台下,每到一块那一行就跟着走;只换那一行的字
+        NotificationCenter.default.addObserver(forName: MirrorSync.changed, object: nil, queue: .main) { [weak self] _ in
+            guard let v = self?.sheet else { return }
+            let t = LXSysNative.mirrorRow()
+            v.patch("app:mirror", val: t.val, sub: t.sub)
+        }
+    }
 
     func open() {
         guard let host = bridge?.viewController?.view else { return }
@@ -755,6 +782,31 @@ enum LXSysNative {
         return "\(hr / 24)d ago"
     }
 
+    /// Local mirror 那一行的字。在下:第几份/一共几份、还差多少;没在下:上次全部跟上是什么时候,
+    /// 上一趟没下完就把原因跟在后面(1008 她:点了没反应、不知道为什么)
+    static func mirrorRow() -> (val: String, sub: String, on: Bool) {
+        let m = MirrorSync.shared.status()
+        let mb = Double((m["bytes"] as? Int64) ?? 0) / 1048576
+        let last = (m["last"] as? Double) ?? 0
+        let running = (m["running"] as? Bool) ?? false
+        let waiting = (m["waiting"] as? Bool) ?? false
+        let size = mb >= 1024 ? String(format: "%.1f GB", mb / 1024) : "\(Int(mb.rounded())) MB"
+        var sub: String
+        if running {
+            if let files = m["files"] as? Int, let left = m["left"] as? Int {
+                let owed = Double((m["owed"] as? Int64) ?? 0) / 1048576
+                sub = "Syncing \(files - left)/\(files) · " + (owed >= 1 ? "\(Int(owed.rounded())) MB" : "<1 MB") + " to go"
+            } else {
+                sub = "Checking what's new…"
+            }
+        } else {
+            sub = "Tap to sync · last " + (last > 0 ? whenShort(Date(timeIntervalSince1970: last)) : "never")
+            if let e = m["error"] as? String { sub += " · " + e }
+            else if waiting { sub += " · waiting for Wi-Fi" }
+        }
+        return (running ? "Syncing…" : (mb > 0 ? size : "Off"), sub, mb > 0)
+    }
+
     static func build(_ done: @escaping ([String: Any]) -> Void) {
         let g = DispatchGroup()
         var perm: [[String: Any]] = [], app: [[String: Any]] = [], api: [[String: Any]] = []
@@ -831,17 +883,8 @@ enum LXSysNative {
         UNUserNotificationCenter.current().getNotificationSettings { _ in
             DispatchQueue.main.async {
                 var rows: [[String: Any]] = []
-                let m = MirrorSync.shared.status()
-                let mb = Double((m["bytes"] as? Int64) ?? 0) / 1048576
-                let last = (m["last"] as? Double) ?? 0
-                let running = (m["running"] as? Bool) ?? false
-                let waiting = (m["waiting"] as? Bool) ?? false
-                let size = mb >= 1024 ? String(format: "%.1f GB", mb / 1024) : "\(Int(mb.rounded())) MB"
-                rows.append(row("app:mirror", "mirror", "Local mirror",
-                                val: running ? "Syncing…" : (mb > 0 ? size : "Off"),
-                                sub: "Tap to sync · last " + (last > 0 ? whenShort(Date(timeIntervalSince1970: last)) : "never")
-                                    + (waiting && !running ? " · waiting for Wi-Fi" : ""),
-                                on: mb > 0))
+                let t = mirrorRow()
+                rows.append(row("app:mirror", "mirror", "Local mirror", val: t.val, sub: t.sub, on: t.on))
                 app = rows; g.leave()
             }
         }
@@ -914,7 +957,8 @@ enum LXSysNative {
                 }
             }
         case "app:mirror":
-            LXToast.show("开始同步,首次记得连WiFi", host: host)
+            // 1008:下载交给后台会话,锁屏、切走都接着下;正在下时点它不另起一趟(run 自己会认出来)
+            LXToast.show(MirrorSync.shared.running ? "正在同步,锁屏、切走也会接着下" : "开始同步,锁屏、切走也会接着下", host: host)
             MirrorSync.shared.run(progress: { _ in }, done: { _, _ in DispatchQueue.main.async { refresh() } })
             refresh()
         case "api:connection":

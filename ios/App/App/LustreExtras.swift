@@ -292,11 +292,45 @@ enum LustreConfig {
     }()
 }
 
-final class MirrorSync {
+// ── 手机本地镜像(0828 她的单:"他有关的数据在我手机里实时备份") ──
+// 1008 根修(她:"你能不能从根源解决问题"):9-25 以后一趟都没跑完过。旧做法只在 App 开在最前面时下,锁屏、切走就停,
+// App 被收掉这趟就白下;整份的文件(relay.db 45MB)每趟从 0 下;日期要整趟全完才改;点了出没出错都不说。现在:
+// · 清单在前台拉,要下的一次全排进后台下载会话:锁屏、切走、App 被系统收掉都照下,下完系统把 App 叫起来交货
+// · 只往后加的(对话记录)按 16MB 一块排,到一块落一块,按顺序接上;没接上的块留着,下一趟不重下
+// · 整份换的一份一个请求:服务器一个请求从头读到尾的是同一个文件,中途换了快照也拼不错
+// · 进度和上次没下完的原因写在 Local mirror 那一行(changed 通知);整趟齐了才改 last
+final class MirrorSync: NSObject, URLSessionDownloadDelegate {
     static let shared = MirrorSync()
     static let lastKey = "lustre.mirror.last"
-    private(set) var running = false
+    static let sessionId = "lx.mirror.bg"
+    static let changed = Notification.Name("lx.mirror.changed")
+    private static let jobKey = "lustre.mirror.job"
+    private static let errKey = "lustre.mirror.err"
+    private static let mtimeKey = "lustre.mirror.mtimes"
+    private static let piece: Int64 = 16 * 1024 * 1024
+    private static let idChars = CharacterSet.urlQueryAllowed.subtracting(CharacterSet(charactersIn: "&+=?#"))
+    var bgDone: (() -> Void)?
     private(set) var waitingWiFi = false   // 自动同步因为在用流量、要下的又多,这次没下
+    private var fetching = false           // 清单还在路上
+    private let queue: OperationQueue = {
+        let q = OperationQueue()
+        q.maxConcurrentOperationCount = 1   // 账只在这一条队列上记
+        return q
+    }()
+    private lazy var session: URLSession = {
+        let c = URLSessionConfiguration.background(withIdentifier: Self.sessionId)
+        c.isDiscretionary = false
+        c.sessionSendsLaunchEvents = true
+        c.httpMaximumConnectionsPerHost = 2
+        c.timeoutIntervalForRequest = 120
+        c.timeoutIntervalForResource = 3 * 24 * 3600
+        return URLSession(configuration: c, delegate: self, delegateQueue: self.queue)
+    }()
+
+    /// 这一趟欠着的:每份要下的多大、哪一版、还有几个请求没回来。记在 UserDefaults 里,
+    /// 系统把 App 叫起来交货、或者她再打开 App,都接得上
+    private struct Owed: Codable { var whole: Bool; var size: Int64; var mtime: Double; var open: Int }
+    private struct Job: Codable { var started: Double; var files: Int; var owed: [String: Owed] }
 
     var dir: URL {
         let d = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
@@ -304,6 +338,9 @@ final class MirrorSync {
         try? FileManager.default.createDirectory(at: d, withIntermediateDirectories: true)
         return d
     }
+    private var chunkDir: URL { dir.appendingPathComponent(".chunks", isDirectory: true) }
+
+    var running: Bool { fetching || loadJob() != nil }
 
     func status() -> [String: Any] {
         var total: Int64 = 0
@@ -313,10 +350,23 @@ final class MirrorSync {
                 total += Int64(n)
             }
         }
-        return ["bytes": total,
-                "last": UserDefaults.standard.double(forKey: MirrorSync.lastKey),
-                "running": running,
-                "waiting": waitingWiFi]
+        var out: [String: Any] = ["bytes": total,
+                                  "last": UserDefaults.standard.double(forKey: MirrorSync.lastKey),
+                                  "running": running,
+                                  "waiting": waitingWiFi]
+        if let job = loadJob() {
+            var left = 0
+            var owed: Int64 = 0
+            for (fid, o) in job.owed where !landed(fid, o) {
+                left += 1
+                owed += o.whole ? o.size : max(0, o.size - bytes(local(fid)))
+            }
+            out["files"] = job.owed.count
+            out["left"] = left
+            out["owed"] = owed
+        }
+        if let e = UserDefaults.standard.string(forKey: MirrorSync.errKey) { out["error"] = e }
+        return out
     }
 
     private func req(_ path: String) -> URLRequest? {
@@ -326,24 +376,279 @@ final class MirrorSync {
         return r
     }
 
-    /// bigOK = false(自动同步碰上流量):这次要下的超过 30MB 就先不下,等 WiFi
-    func run(bigOK: Bool = true, progress: @escaping (String) -> Void, done: @escaping (Bool, String) -> Void) {
-        guard !running else { done(false, "already running"); return }
-        running = true
-        guard let mreq = req("/app/mirror/manifest") else { running = false; done(false, "no config"); return }
-        URLSession.shared.dataTask(with: mreq) { data, _, _ in
-            guard let data,
-                  let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                  let files = obj["files"] as? [[String: Any]] else {
-                self.running = false; done(false, "manifest failed"); return
+    /// bigOK = false(自动同步碰上流量):这次要下的超过 30MB 就先不下,等 WiFi。
+    /// done 在排好队(或者不用下、没排成)时就回,不等下完;下的过程走 changed 通知
+    func run(bigOK: Bool = true, progress: @escaping (String) -> Void = { _ in },
+             done: @escaping (Bool, String) -> Void = { _, _ in }) {
+        session.getAllTasks { tasks in
+            self.queue.addOperation {
+                if !tasks.isEmpty || self.fetching { done(false, "already running"); return }
+                // 上一趟的请求一个都不在了(她划掉 App 时系统会把后台下载撤掉):到手的先接上、结账
+                if self.loadJob() != nil { self.settle() }
+                guard let mreq = self.req("/app/mirror/manifest") else {
+                    self.fail("no config"); done(false, "no config"); return
+                }
+                self.fetching = true
+                self.ping()
+                URLSession.shared.dataTask(with: mreq) { data, resp, err in
+                    self.queue.addOperation {
+                        self.fetching = false
+                        let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
+                        guard code == 200, let data,
+                              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                              let files = obj["files"] as? [[String: Any]] else {
+                            let why = err != nil ? "server didn't answer" : "server said \(code)"
+                            self.fail(why); done(false, why); return
+                        }
+                        self.plan(files, bigOK: bigOK, progress: progress, done: done)
+                    }
+                }.resume()
             }
-            if !bigOK, self.pendingBytes(files) > Self.bigBytes {
-                self.waitingWiFi = true
-                self.running = false; done(false, "waiting for Wi-Fi"); return
+        }
+    }
+
+    private func plan(_ files: [[String: Any]], bigOK: Bool,
+                      progress: (String) -> Void, done: (Bool, String) -> Void) {
+        let fm = FileManager.default
+        var owed: [String: Owed] = [:]
+        var asks: [(fid: String, from: Int64, len: Int64)] = []   // len 0 = 到文件尾
+        var need: Int64 = 0
+        for f in files {
+            guard let fid = f["id"] as? String, !fid.isEmpty else { continue }
+            let size = ((f["size"] as? NSNumber)?.int64Value) ?? 0
+            let mtime = ((f["mtime"] as? NSNumber)?.doubleValue) ?? 0
+            let u = local(fid)
+            try? fm.createDirectory(at: u.deletingLastPathComponent(), withIntermediateDirectories: true)
+            if isAppendOnly(fid) {
+                splice(fid)
+                var have = bytes(u)
+                if have > size {   // 服务器那份变短了=换了文件:本地这份和碎块都不认
+                    try? fm.removeItem(at: u)
+                    for at in pieces(fid).keys { try? fm.removeItem(at: chunk(fid, at)) }
+                    have = 0
+                }
+                if !fm.fileExists(atPath: u.path) { fm.createFile(atPath: u.path, contents: nil) }
+                if have == size { continue }
+                let held = pieces(fid)   // 上一趟到了、还没接上的块:起点 → 长度
+                var at = have, n = 0
+                while at < size {
+                    if let len = held[at], len > 0 { at += len; continue }
+                    let next = held.keys.filter { $0 > at }.min() ?? size
+                    let len = min(Self.piece, min(next, size) - at)
+                    asks.append((fid, at, len))
+                    at += len
+                    n += 1
+                }
+                if n == 0 { splice(fid); continue }   // 缺的全在碎块里,接上就齐
+                need += size - have
+                owed[fid] = Owed(whole: false, size: size, mtime: mtime, open: n)
+            } else {
+                if fm.fileExists(atPath: u.path), bytes(u) == size, savedMtime(fid) == mtime { continue }
+                if size == 0 {
+                    try? fm.removeItem(at: u)
+                    fm.createFile(atPath: u.path, contents: nil)
+                    setMtime(fid, mtime)
+                    continue
+                }
+                asks.append((fid, 0, 0))
+                need += size
+                owed[fid] = Owed(whole: true, size: size, mtime: mtime, open: 1)
             }
-            self.waitingWiFi = false
-            self.step(files, 0, 0, progress, done)
-        }.resume()
+        }
+        if !bigOK && need > Self.bigBytes {
+            waitingWiFi = true
+            ping(); done(false, "waiting for Wi-Fi"); return
+        }
+        waitingWiFi = false
+        UserDefaults.standard.removeObject(forKey: Self.errKey)
+        if owed.isEmpty {
+            UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: Self.lastKey)
+            ping(); done(true, "up to date"); return
+        }
+        var tasks: [URLSessionDownloadTask] = []
+        for a in asks {
+            let id = a.fid.addingPercentEncoding(withAllowedCharacters: Self.idChars) ?? a.fid
+            guard var r = req("/app/mirror/file?id=\(id)&from=\(a.from)" + (a.len > 0 ? "&limit=\(a.len)" : "")) else {
+                owed[a.fid]?.open -= 1   // 请求都拼不出来:这份这趟不下,结账时算没齐
+                continue
+            }
+            if !bigOK { r.allowsExpensiveNetworkAccess = false; r.allowsConstrainedNetworkAccess = false }
+            let t = session.downloadTask(with: r)
+            t.taskDescription = "\(a.from)\t\(a.len)\t\(a.fid)"
+            tasks.append(t)
+        }
+        saveJob(Job(started: Date().timeIntervalSince1970, files: files.count, owed: owed))
+        if tasks.isEmpty { settle(); done(false, "nothing could be requested"); return }
+        tasks.forEach { $0.resume() }
+        ping()
+        progress("\(owed.count) files to fetch")
+        done(true, "\(owed.count) files · \(need / 1024)KB")
+    }
+
+    func urlSession(_ session: URLSession, downloadTask t: URLSessionDownloadTask, didFinishDownloadingTo loc: URL) {
+        guard let a = parse(t.taskDescription), let o = loadJob()?.owed[a.fid],
+              (t.response as? HTTPURLResponse)?.statusCode == 200 else { return }
+        let fm = FileManager.default
+        let got = bytes(loc)
+        if o.whole {
+            // 整份:一个请求就是整个文件,长度对得上才换上去
+            guard got == o.size else { return }
+            let u = local(a.fid)
+            let part = u.appendingPathExtension("part")
+            try? fm.removeItem(at: part)
+            do {
+                try fm.moveItem(at: loc, to: part)
+                if fm.fileExists(atPath: u.path) { _ = try fm.replaceItemAt(u, withItemAt: part) }
+                else { try fm.moveItem(at: part, to: u) }
+                setMtime(a.fid, o.mtime)
+            } catch {}
+        } else {
+            guard got == a.len else { return }
+            try? fm.createDirectory(at: chunkDir, withIntermediateDirectories: true)
+            let c = chunk(a.fid, a.from)
+            try? fm.removeItem(at: c)
+            if (try? fm.moveItem(at: loc, to: c)) != nil { splice(a.fid) }
+        }
+    }
+
+    func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
+        guard let a = parse(task.taskDescription), var job = loadJob(), var o = job.owed[a.fid] else { return }
+        o.open = max(0, o.open - 1)
+        job.owed[a.fid] = o
+        saveJob(job)
+        if job.owed.values.allSatisfy({ $0.open == 0 }) { settle() } else { ping() }
+    }
+
+    func urlSessionDidFinishEvents(forBackgroundURLSession session: URLSession) {
+        DispatchQueue.main.async { self.bgDone?(); self.bgDone = nil }
+    }
+
+    /// 开机、被系统叫起来交货时把后台会话接上。上一趟的请求要是全没了(她划掉 App 时系统会撤掉后台下载),
+    /// 等交货的事件走完(15 秒)再结账,那一行就不会一直挂着 Syncing
+    func wake() {
+        let t0 = Date().timeIntervalSince1970
+        session.getAllTasks { tasks in
+            guard tasks.isEmpty else { return }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 15) {
+                self.session.getAllTasks { again in
+                    guard again.isEmpty else { return }
+                    self.queue.addOperation {
+                        if let job = self.loadJob(), job.started < t0, !self.fetching { self.settle() }
+                    }
+                }
+            }
+        }
+    }
+
+    /// 结账:能接的接上,数还差几份。全齐了才改 last;差的下一趟从接到的地方续,碎块留着不重下
+    private func settle() {
+        guard let job = loadJob() else { return }
+        for (fid, o) in job.owed where !o.whole { splice(fid) }
+        let short = job.owed.filter { !landed($0.key, $0.value) }.count
+        UserDefaults.standard.removeObject(forKey: Self.jobKey)
+        if short == 0 {
+            UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: Self.lastKey)
+            UserDefaults.standard.removeObject(forKey: Self.errKey)
+            ping()
+        } else {
+            fail(short == 1 ? "1 file didn't finish" : "\(short) files didn't finish")
+        }
+    }
+
+    private func fail(_ why: String) {
+        UserDefaults.standard.set(why, forKey: Self.errKey)
+        ping()
+    }
+
+    private func ping() {
+        DispatchQueue.main.async { NotificationCenter.default.post(name: MirrorSync.changed, object: nil) }
+    }
+
+    private func loadJob() -> Job? {
+        guard let d = UserDefaults.standard.data(forKey: Self.jobKey) else { return nil }
+        return try? JSONDecoder().decode(Job.self, from: d)
+    }
+
+    private func saveJob(_ j: Job) {
+        if let d = try? JSONEncoder().encode(j) { UserDefaults.standard.set(d, forKey: Self.jobKey) }
+    }
+
+    private func parse(_ d: String?) -> (from: Int64, len: Int64, fid: String)? {
+        guard let p = d?.split(separator: "\t", maxSplits: 2, omittingEmptySubsequences: false), p.count == 3,
+              let from = Int64(p[0]), let len = Int64(p[1]) else { return nil }
+        return (from, len, String(p[2]))
+    }
+
+    private func local(_ fid: String) -> URL {
+        let safe = fid.components(separatedBy: "/").filter { $0 != ".." && !$0.isEmpty }.joined(separator: "/")
+        return dir.appendingPathComponent(safe)
+    }
+
+    private func bytes(_ u: URL) -> Int64 {
+        ((try? FileManager.default.attributesOfItem(atPath: u.path))?[.size] as? NSNumber)?.int64Value ?? 0
+    }
+
+    private func isAppendOnly(_ fid: String) -> Bool {
+        return fid.hasPrefix("transcripts-")
+    }
+
+    /// 这一份齐了没有(按磁盘上的实际样子算)
+    private func landed(_ fid: String, _ o: Owed) -> Bool {
+        let u = local(fid)
+        guard FileManager.default.fileExists(atPath: u.path), bytes(u) == o.size else { return false }
+        return !o.whole || savedMtime(fid) == o.mtime
+    }
+
+    private func chunk(_ fid: String, _ at: Int64) -> URL {
+        chunkDir.appendingPathComponent(fid.replacingOccurrences(of: "/", with: "|") + "@\(at)")
+    }
+
+    /// 这份文件到了、还没接上的块:起点 → 长度
+    private func pieces(_ fid: String) -> [Int64: Int64] {
+        let pre = fid.replacingOccurrences(of: "/", with: "|") + "@"
+        var out: [Int64: Int64] = [:]
+        for name in (try? FileManager.default.contentsOfDirectory(atPath: chunkDir.path)) ?? [] where name.hasPrefix(pre) {
+            if let at = Int64(name.dropFirst(pre.count)) { out[at] = bytes(chunkDir.appendingPathComponent(name)) }
+        }
+        return out
+    }
+
+    /// 到手的块按顺序接到正身上:正身多长就找从那儿起的那块,接上删掉,接到接不上为止
+    private func splice(_ fid: String) {
+        let fm = FileManager.default
+        let u = local(fid)
+        while true {
+            let c = chunk(fid, bytes(u))
+            guard fm.fileExists(atPath: c.path) else { return }
+            if !fm.fileExists(atPath: u.path) { fm.createFile(atPath: u.path, contents: nil) }
+            guard let out = try? FileHandle(forWritingTo: u), let inp = InputStream(url: c) else { return }
+            var ok = true
+            do {
+                try out.seekToEnd()
+                inp.open()
+                var buf = [UInt8](repeating: 0, count: 512 * 1024)
+                while inp.hasBytesAvailable {
+                    let n = inp.read(&buf, maxLength: buf.count)
+                    if n <= 0 { break }
+                    try out.write(contentsOf: Data(bytes: buf, count: n))
+                }
+            } catch { ok = false }
+            inp.close()
+            try? out.close()
+            guard ok else { return }   // 写不进去(满了)就停,块留着下次再接
+            try? fm.removeItem(at: c)
+        }
+    }
+
+    private func savedMtime(_ fid: String) -> Double {
+        let d = UserDefaults.standard.dictionary(forKey: MirrorSync.mtimeKey) as? [String: Double] ?? [:]
+        return d[fid] ?? 0
+    }
+
+    private func setMtime(_ fid: String, _ v: Double) {
+        var d = UserDefaults.standard.dictionary(forKey: MirrorSync.mtimeKey) as? [String: Double] ?? [:]
+        d[fid] = v
+        UserDefaults.standard.set(d, forKey: MirrorSync.mtimeKey)
     }
 
     // ── 自动同步(1006 她:"改原生之后也要一直跟着更新啊")──
@@ -357,6 +662,7 @@ final class MirrorSync {
     private let netMon = NWPathMonitor()
 
     func startAuto() {
+        wake()
         netMon.pathUpdateHandler = { [weak self] p in self?.onCellular = p.isExpensive || p.isConstrained }
         netMon.start(queue: .main)
         let nc = NotificationCenter.default
@@ -379,175 +685,16 @@ final class MirrorSync {
         autoTimer = nil
         guard UIApplication.shared.applicationState == .active else { return }
         arm(after: 300)
-        guard !running, !LustreConfig.isPreview else { return }
+        guard !LustreConfig.isPreview else { return }
         let now = Date().timeIntervalSince1970
         let last = UserDefaults.standard.double(forKey: Self.lastKey)
         guard last > 0, now - last >= 1800, now - lastKick >= 1800 else { return }
         lastKick = now
+        // 正在下(后台会话里还有请求)run 自己会回 already running;上一趟被撤掉的,run 先结账再重排
         run(bigOK: !onCellular, progress: { _ in }, done: { [weak self] ok, _ in
-            // 没跑成(等 WiFi、服务器没回):别等半小时,5 分钟后那一问再试
+            // 没排成(等 WiFi、服务器没回、还在下):别等半小时,5 分钟后那一问再试
             if !ok { DispatchQueue.main.async { self?.lastKick = 0 } }
         })
-    }
-
-    /// 这次要下多少:只往后加的按缺的尾巴算,整份换的按整份算(跟 step 里判断跳不跳一个口径)
-    private func pendingBytes(_ files: [[String: Any]]) -> Int64 {
-        var sum: Int64 = 0
-        for f in files {
-            let fid = (f["id"] as? String) ?? ""
-            let size = ((f["size"] as? NSNumber)?.int64Value) ?? 0
-            let mtime = ((f["mtime"] as? NSNumber)?.doubleValue) ?? 0
-            let safe = fid.components(separatedBy: "/").filter { $0 != ".." && !$0.isEmpty }.joined(separator: "/")
-            let local = dir.appendingPathComponent(safe)
-            let exists = FileManager.default.fileExists(atPath: local.path)
-            let have = ((try? FileManager.default.attributesOfItem(atPath: local.path))?[.size] as? NSNumber)?.int64Value ?? 0
-            if isAppendOnly(fid) { sum += have > size ? size : size - have }
-            else if !(exists && have == size && savedMtime(fid) == mtime) { sum += size }
-        }
-        return sum
-    }
-
-    private func step(_ files: [[String: Any]], _ i: Int, _ grabbed: Int64,
-                      _ progress: @escaping (String) -> Void, _ done: @escaping (Bool, String) -> Void) {
-        if i >= files.count {
-            running = false
-            UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: MirrorSync.lastKey)
-            done(true, "\(files.count) files · +\(grabbed / 1024)KB")
-            return
-        }
-        let fid = (files[i]["id"] as? String) ?? ""
-        let size = ((files[i]["size"] as? NSNumber)?.int64Value) ?? 0
-        let mtime = ((files[i]["mtime"] as? NSNumber)?.doubleValue) ?? 0
-        let safe = fid.components(separatedBy: "/").filter { $0 != ".." && !$0.isEmpty }.joined(separator: "/")
-        let local = dir.appendingPathComponent(safe)
-        try? FileManager.default.createDirectory(at: local.deletingLastPathComponent(), withIntermediateDirectories: true)
-        var have: Int64 = 0
-        if let a = try? FileManager.default.attributesOfItem(atPath: local.path),
-           let n = a[.size] as? NSNumber { have = n.int64Value }
-
-        if !isAppendOnly(fid) {
-            if FileManager.default.fileExists(atPath: local.path), have == size, savedMtime(fid) == mtime {
-                step(files, i + 1, grabbed, progress, done); return
-            }
-            let part = local.appendingPathExtension("part")
-            try? FileManager.default.removeItem(at: part)
-            pullWhole(files, i, fid, size, mtime, local, part, 0, grabbed, 0, progress, done)
-            return
-        }
-
-        if have == size { step(files, i + 1, grabbed, progress, done); return }
-        if have > size { try? FileManager.default.removeItem(at: local); have = 0 }
-        pull(files, i, fid, size, local, have, grabbed, 0, progress, done)
-    }
-
-    private func isAppendOnly(_ fid: String) -> Bool {
-        return fid.hasPrefix("transcripts-")
-    }
-
-    private static let mtimeKey = "lustre.mirror.mtimes"
-
-    private func savedMtime(_ fid: String) -> Double {
-        let d = UserDefaults.standard.dictionary(forKey: MirrorSync.mtimeKey) as? [String: Double] ?? [:]
-        return d[fid] ?? 0
-    }
-
-    private func setMtime(_ fid: String, _ v: Double) {
-        var d = UserDefaults.standard.dictionary(forKey: MirrorSync.mtimeKey) as? [String: Double] ?? [:]
-        d[fid] = v
-        UserDefaults.standard.set(d, forKey: MirrorSync.mtimeKey)
-    }
-
-    private func pullWhole(_ files: [[String: Any]], _ i: Int, _ fid: String, _ size: Int64, _ mtime: Double,
-                           _ local: URL, _ part: URL, _ got: Int64, _ grabbed: Int64, _ tries: Int,
-                           _ progress: @escaping (String) -> Void, _ done: @escaping (Bool, String) -> Void) {
-        if got >= size {
-            if FileManager.default.fileExists(atPath: part.path) {
-                try? FileManager.default.removeItem(at: local)
-                try? FileManager.default.moveItem(at: part, to: local)
-                setMtime(fid, mtime)
-            }
-            step(files, i + 1, grabbed, progress, done); return
-        }
-        let q = fid.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? fid
-        guard let freq = req("/app/mirror/file?id=\(q)&from=\(got)&limit=8388608") else {
-            try? FileManager.default.removeItem(at: part)
-            step(files, i + 1, grabbed, progress, done); return
-        }
-        let pct = size > 0 ? Int(got * 100 / size) : 0
-        progress("\(i + 1)/\(files.count) \(fid) \(pct)%")
-        URLSession.shared.downloadTask(with: freq) { tmp, resp, _ in
-            defer { if let tmp { try? FileManager.default.removeItem(at: tmp) } }
-            var added: Int64 = 0
-            if let tmp, let code = (resp as? HTTPURLResponse)?.statusCode, code == 200 {
-                if !FileManager.default.fileExists(atPath: part.path) {
-                    FileManager.default.createFile(atPath: part.path, contents: nil)
-                }
-                if let out = try? FileHandle(forWritingTo: part),
-                   let inp = InputStream(url: tmp) {
-                    out.seekToEndOfFile()
-                    inp.open()
-                    var buf = [UInt8](repeating: 0, count: 512 * 1024)
-                    while inp.hasBytesAvailable {
-                        let n = inp.read(&buf, maxLength: buf.count)
-                        if n <= 0 { break }
-                        out.write(Data(bytes: buf, count: n))
-                        added += Int64(n)
-                    }
-                    inp.close()
-                    try? out.close()
-                }
-            }
-            if added > 0 {
-                self.pullWhole(files, i, fid, size, mtime, local, part, got + added, grabbed + added, 0, progress, done)
-            } else if tries < 2 {
-                self.pullWhole(files, i, fid, size, mtime, local, part, got, grabbed, tries + 1, progress, done)
-            } else {
-                try? FileManager.default.removeItem(at: part)
-                self.step(files, i + 1, grabbed, progress, done)
-            }
-        }.resume()
-    }
-
-    private func pull(_ files: [[String: Any]], _ i: Int, _ fid: String, _ size: Int64, _ local: URL,
-                      _ have: Int64, _ grabbed: Int64, _ tries: Int,
-                      _ progress: @escaping (String) -> Void, _ done: @escaping (Bool, String) -> Void) {
-        if have >= size { step(files, i + 1, grabbed, progress, done); return }
-        let q = fid.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? fid
-        guard let freq = req("/app/mirror/file?id=\(q)&from=\(have)&limit=8388608") else {
-            step(files, i + 1, grabbed, progress, done); return
-        }
-        let pct = size > 0 ? Int(have * 100 / size) : 0
-        progress("\(i + 1)/\(files.count) \(fid) \(pct)%")
-        URLSession.shared.downloadTask(with: freq) { tmp, resp, _ in
-            defer { if let tmp { try? FileManager.default.removeItem(at: tmp) } }
-            var added: Int64 = 0
-            if let tmp, let code = (resp as? HTTPURLResponse)?.statusCode, code == 200 {
-                if !FileManager.default.fileExists(atPath: local.path) {
-                    FileManager.default.createFile(atPath: local.path, contents: nil)
-                }
-                if let out = try? FileHandle(forWritingTo: local),
-                   let inp = InputStream(url: tmp) {
-                    out.seekToEndOfFile()
-                    inp.open()
-                    var buf = [UInt8](repeating: 0, count: 512 * 1024)
-                    while inp.hasBytesAvailable {
-                        let n = inp.read(&buf, maxLength: buf.count)
-                        if n <= 0 { break }
-                        out.write(Data(bytes: buf, count: n))
-                        added += Int64(n)
-                    }
-                    inp.close()
-                    try? out.close()
-                }
-            }
-            if added > 0 {
-                self.pull(files, i, fid, size, local, have + added, grabbed + added, 0, progress, done)
-            } else if tries < 2 {
-                self.pull(files, i, fid, size, local, have, grabbed, tries + 1, progress, done)
-            } else {
-                self.step(files, i + 1, grabbed, progress, done)
-            }
-        }.resume()
     }
 }
 
