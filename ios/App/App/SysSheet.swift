@@ -385,6 +385,12 @@ final class LXSysSheetView: UIView {
     func patch(_ sel: String, val: String, sub: String) {
         rows.first { $0.row.sel == sel }?.setText(val: val, sub: sub)
     }
+    /// 预览用:把某一行滚到看得见的地方
+    func previewReveal(_ sel: String) {
+        guard let r = rows.first(where: { $0.row.sel == sel }) else { return }
+        layoutIfNeeded()
+        scroll.scrollRectToVisible(r.convert(r.bounds, to: scroll).insetBy(dx: 0, dy: -40), animated: false)
+    }
     func retheme() { tint = LXSysTint.cur(); recolor() }
 
     private func recolor() {
@@ -784,8 +790,9 @@ enum LXSysNative {
 
     /// Local mirror 那一行的字。在下:第几份/一共几份、还差多少;没在下:上次全部跟上是什么时候,
     /// 上一趟没下完就把原因跟在后面(1008 她:点了没反应、不知道为什么)
+    static var previewStatus: [String: Any]?   // 预览路线 sys 塞的假进度
     static func mirrorRow() -> (val: String, sub: String, on: Bool) {
-        let m = MirrorSync.shared.status()
+        let m = previewStatus ?? MirrorSync.shared.status()
         let mb = Double((m["bytes"] as? Int64) ?? 0) / 1048576
         let last = (m["last"] as? Double) ?? 0
         let running = (m["running"] as? Bool) ?? false
@@ -957,10 +964,10 @@ enum LXSysNative {
                 }
             }
         case "app:mirror":
-            // 1008:下载交给后台会话,锁屏、切走都接着下;正在下时点它不另起一趟(run 自己会认出来)
+            // 1008:下载交给后台会话,锁屏、切走都接着下;正在下时点它不另起一趟(run 自己会认出来)。
+            // 那一行靠 changed 通知原地换字,这里不刷整张(整张重建会闪)
             LXToast.show(MirrorSync.shared.running ? "正在同步,锁屏、切走也会接着下" : "开始同步,锁屏、切走也会接着下", host: host)
-            MirrorSync.shared.run(progress: { _ in }, done: { _, _ in DispatchQueue.main.async { refresh() } })
-            refresh()
+            MirrorSync.shared.run()
         case "api:connection":
             getJSON("/app/brain") { d in
                 let next = (d?["target"] as? String ?? "desktop") == "loop" ? "desktop" : "loop"
@@ -975,6 +982,47 @@ enum LXSysNative {
             }
         default:
             break
+        }
+    }
+}
+
+// MARK: - 预览路线 sys:只开设置卡,Local mirror 那一行喂假进度(聊天里不画消息),六步
+
+enum LXSysPreview {
+    static func start(tries: Int = 0) {
+        guard LustreConfig.isPreview, LustreConfig.previewFocus == "sys" else { return }
+        guard let plugin = SysPlugin.live, let host = plugin.bridge?.viewController?.view, host.window != nil else {
+            if tries < 40 { DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { start(tries: tries + 1) } }
+            return
+        }
+        let now = Date().timeIntervalSince1970
+        let size: Int64 = 1_288_490_189
+        func st(_ hAgo: Double, _ extra: [String: Any]) -> [String: Any] {
+            var d: [String: Any] = ["bytes": size, "last": now - hAgo * 3600, "running": false, "waiting": false]
+            for (k, v) in extra { d[k] = v }
+            return d
+        }
+        let steps: [(UIColor, [String: Any])] = [
+            (.yellow, st(2, [:])),                                                                 // 没在下:上次 2 小时前
+            (.cyan, st(2, ["running": true])),                                                     // 在拉清单
+            (.red, st(2, ["running": true, "files": 12, "left": 9, "owed": Int64(402 * 1_048_576)])), // 下到第 3 份
+            (.orange, st(2, ["running": true, "files": 12, "left": 1, "owed": Int64(700_000)])),       // 差最后一点
+            (UIColor(red: 0.5, green: 0, blue: 1, alpha: 1), st(13 * 24, ["error": "2 files didn't finish"])),
+            (.green, st(13 * 24, ["waiting": true])),
+        ]
+        LXSysNative.previewStatus = steps[0].1
+        plugin.open()
+        let mark = UIView(frame: LXBubbleSampler.beacon)
+        mark.backgroundColor = UIColor(red: 1, green: 0, blue: 1, alpha: 1)
+        let phase = UIView(frame: CGRect(x: 28, y: 70, width: 20, height: 20))
+        for (i, s) in steps.enumerated() {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 6 + Double(i) * 12) {
+                LXSysNative.previewStatus = s.1
+                NotificationCenter.default.post(name: MirrorSync.changed, object: nil)
+                plugin.sheet?.previewReveal("app:mirror")
+                phase.backgroundColor = s.0
+                for v in [mark, phase] { if v.superview !== host { host.addSubview(v) }; host.bringSubviewToFront(v) }
+            }
         }
     }
 }

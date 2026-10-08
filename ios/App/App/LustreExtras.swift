@@ -279,7 +279,7 @@ enum LustreConfig {
         return (lx["previewFocus"] as? String) ?? ""
     }()
     /// 只拍一样东西、不许露真数据的预览路线(输入栏 / 样板气泡):首页自检和整套巡游都不跑
-    static var previewNarrow: Bool { previewFocus == "composer" || previewFocus == "bubbles" || previewFocus == "coread" || previewFocus == "watch" || previewFocus == "pocket" || previewFocus == "moments" || previewFocus == "radio" }
+    static var previewNarrow: Bool { previewFocus == "composer" || previewFocus == "bubbles" || previewFocus == "coread" || previewFocus == "watch" || previewFocus == "pocket" || previewFocus == "moments" || previewFocus == "radio" || previewFocus == "sys" }
 
     static var isPreview: Bool = {
         if let lx = config["lustre"] as? [String: Any], lx["preview"] as? Bool == true { return true }
@@ -651,10 +651,12 @@ final class MirrorSync: NSObject, URLSessionDownloadDelegate {
         UserDefaults.standard.set(d, forKey: MirrorSync.mtimeKey)
     }
 
-    // ── 自动同步(1006 她:"改原生之后也要一直跟着更新啊")──
+    // ── 自动同步(1006 她:"改原生之后也要一直跟着更新啊";1008 她:"不要我每次手动拉才更新")──
     // 9-25 换原生以后没人叫镜像跑了(以前是网页里的 autoMirror 叫),手机那份停了 11 天。规矩照网页版搬:
-    // 首拉做过(last≠0,第一次整份下载她自己连 WiFi 点)/ 离上次 ≥30 分钟 / App 连着开满 90 秒才动(躲开开面那几秒的内存尖峰,0920 那次崩溃)。
-    // 网页版只在回前台时问一次;这里开着不走也每 5 分钟问一次。原生多一道:要下的超过 30MB 又在用流量(蜂窝、热点、低数据模式)就等 WiFi。
+    // 首拉做过(last≠0,第一次整份下载她自己连 WiFi 点)/ 离上次 ≥30 分钟。
+    // 两处会问:App 开着(开满 15 秒问一次,之后每 5 分钟)+ App 没开、系统叫醒它做后台刷新时(BackgroundSync.run)。
+    // 以前要开满 90 秒是躲 0920 开面那几秒的内存尖峰;1008 起下载交给系统的后台会话,不在 App 里占内存,不用等那么久。
+    // 原生多一道:要下的超过 30MB 又在用流量(蜂窝、热点、低数据模式)就等 WiFi。
     private static let bigBytes: Int64 = 30 * 1024 * 1024
     private var autoTimer: Timer?
     private var lastKick: TimeInterval = 0
@@ -667,13 +669,13 @@ final class MirrorSync: NSObject, URLSessionDownloadDelegate {
         netMon.start(queue: .main)
         let nc = NotificationCenter.default
         nc.addObserver(forName: UIApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
-            self?.arm(after: 92)
+            self?.arm(after: 15)
         }
         nc.addObserver(forName: UIApplication.willResignActiveNotification, object: nil, queue: .main) { [weak self] _ in
             self?.autoTimer?.invalidate()
             self?.autoTimer = nil
         }
-        if UIApplication.shared.applicationState == .active { arm(after: 92) }
+        if UIApplication.shared.applicationState == .active { arm(after: 15) }
     }
 
     private func arm(after s: TimeInterval) {
@@ -685,16 +687,25 @@ final class MirrorSync: NSObject, URLSessionDownloadDelegate {
         autoTimer = nil
         guard UIApplication.shared.applicationState == .active else { return }
         arm(after: 300)
-        guard !LustreConfig.isPreview else { return }
-        let now = Date().timeIntervalSince1970
-        let last = UserDefaults.standard.double(forKey: Self.lastKey)
-        guard last > 0, now - last >= 1800, now - lastKick >= 1800 else { return }
-        lastKick = now
-        // 正在下(后台会话里还有请求)run 自己会回 already running;上一趟被撤掉的,run 先结账再重排
-        run(bigOK: !onCellular, progress: { _ in }, done: { [weak self] ok, _ in
-            // 没排成(等 WiFi、服务器没回、还在下):别等半小时,5 分钟后那一问再试
-            if !ok { DispatchQueue.main.async { self?.lastKick = 0 } }
-        })
+        autoRun()
+    }
+
+    /// 到点了就跟一趟。done 在排好队、不用排、或这次不跟时回(后台刷新等它回了才交差)
+    func autoRun(_ done: @escaping () -> Void = {}) {
+        DispatchQueue.main.async {
+            let now = Date().timeIntervalSince1970
+            let last = UserDefaults.standard.double(forKey: Self.lastKey)
+            guard !LustreConfig.isPreview, last > 0, now - last >= 1800, now - self.lastKick >= 1800 else { done(); return }
+            self.lastKick = now
+            // 正在下(后台会话里还有请求)run 自己会回 already running;上一趟被撤掉的,run 先结账再重排
+            self.run(bigOK: !self.onCellular, progress: { _ in }, done: { [weak self] ok, _ in
+                DispatchQueue.main.async {
+                    // 没排成(等 WiFi、服务器没回、还在下):别等半小时,下一问再试
+                    if !ok { self?.lastKick = 0 }
+                    done()
+                }
+            })
+        }
     }
 }
 
@@ -874,9 +885,17 @@ final class BackgroundSync {
     func handle(_ task: BGAppRefreshTask?) {
         schedule()
         guard let task = task else { return }
-        let work = DispatchWorkItem { }
-        task.expirationHandler = { work.cancel() }
-        run { task.setTaskCompleted(success: true) }
+        // 系统给的时间到了就当场交差,只交一次(到点不交差系统会把 App 杀掉)
+        let lock = NSLock()
+        var finished = false
+        let finish: (Bool) -> Void = { ok in
+            lock.lock(); defer { lock.unlock() }
+            guard !finished else { return }
+            finished = true
+            task.setTaskCompleted(success: ok)
+        }
+        task.expirationHandler = { finish(false) }
+        run { finish(true) }
     }
 
     func run(_ done: @escaping () -> Void) {
@@ -884,6 +903,8 @@ final class BackgroundSync {
         let group = DispatchGroup()
         group.enter(); checkMessages { group.leave() }
         group.enter(); pushHealth { group.leave() }
+        // 1008:App 没开时镜像也跟。这里只拉清单、排队,下载交给系统的后台会话,不占这几十秒
+        group.enter(); MirrorSync.shared.autoRun { group.leave() }
         group.notify(queue: .main) { done() }
     }
 
