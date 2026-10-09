@@ -787,9 +787,9 @@ final class LXMomentComposer: UIView, UITextViewDelegate {
 
     override init(frame: CGRect) {
         super.init(frame: frame)
-        // .mo-sheet:卡片底 + 模糊 14,上圆角 18,padding 12 16 10
+        // .mo-sheet:卡片底 + 模糊 14,圆角 18,padding 12 16 10。
+        // 1009 她:贴着键盘的两个直角看着难受 → 四个角都圆,整张浮在键盘上面(位置见 LXMomentsVC.composerLift)
         layer.cornerRadius = 18
-        layer.maskedCorners = [.layerMinXMinYCorner, .layerMaxXMinYCorner]
         layer.borderWidth = 1
         clipsToBounds = true
         let blur = UIVisualEffectView(effect: UIBlurEffect(style: .systemThinMaterial))
@@ -1140,8 +1140,8 @@ final class LXMomentsVC: UIViewController, UIScrollViewDelegate, PHPickerViewCon
         NSLayoutConstraint.activate([
             catcher.topAnchor.constraint(equalTo: view.topAnchor), catcher.bottomAnchor.constraint(equalTo: view.bottomAnchor),
             catcher.leadingAnchor.constraint(equalTo: view.leadingAnchor), catcher.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            composer.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            composer.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            composer.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: Self.composerGap),
+            composer.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -Self.composerGap),
             composerBottom,
         ])
 
@@ -1159,7 +1159,7 @@ final class LXMomentsVC: UIViewController, UIScrollViewDelegate, PHPickerViewCon
         super.viewWillAppear(animated)
         // 上次关页时键盘的高度不作数
         kbH = 0
-        composerBottom.constant = 0
+        composerBottom.constant = -composerLift()
         scroll.verticalScrollIndicatorInsets.bottom = 0
         if !LustreConfig.isPreview { LXNick.refresh() }   // 她的名字:服务器新给的,开页拉一次
         paint()
@@ -1487,7 +1487,7 @@ final class LXMomentsVC: UIViewController, UIScrollViewDelegate, PHPickerViewCon
             composer.isHidden = false
             catcher.isHidden = false
             view.layoutIfNeeded()
-            composer.transform = CGAffineTransform(translationX: 0, y: composer.bounds.height * 1.05)
+            composer.transform = CGAffineTransform(translationX: 0, y: composer.bounds.height + composerLift() + Self.composerGap)
             UIView.animate(withDuration: 0.32, delay: 0, usingSpringWithDamping: 1, initialSpringVelocity: 0) {
                 self.composer.transform = .identity
             }
@@ -1496,7 +1496,7 @@ final class LXMomentsVC: UIViewController, UIScrollViewDelegate, PHPickerViewCon
             composer.tv.resignFirstResponder()
             catcher.isHidden = true
             UIView.animate(withDuration: 0.28, animations: {
-                self.composer.transform = CGAffineTransform(translationX: 0, y: self.composer.bounds.height * 1.05 + self.kbH)
+                self.composer.transform = CGAffineTransform(translationX: 0, y: self.composer.bounds.height + self.composerLift() + Self.composerGap)
             }) { _ in if !self.composerOn { self.composer.isHidden = true; self.composer.transform = .identity } }
         }
     }
@@ -1522,6 +1522,10 @@ final class LXMomentsVC: UIViewController, UIScrollViewDelegate, PHPickerViewCon
         }
     }
 
+    /// 发布卡离两边、离键盘都空一道缝;没有键盘时浮在底部安全区上面
+    private static let composerGap: CGFloat = 8
+    private func composerLift() -> CGFloat { (kbH > 0 ? kbH : view.safeAreaInsets.bottom) + Self.composerGap }
+
     @objc private func kbChange(_ n: Notification) {
         // 页关着时别的页弹键盘不归这里管
         guard view.window != nil,
@@ -1529,7 +1533,7 @@ final class LXMomentsVC: UIViewController, UIScrollViewDelegate, PHPickerViewCon
         let local = view.convert(end, from: nil)
         kbH = max(0, view.bounds.height - local.minY)
         let dur = (n.userInfo?[UIResponder.keyboardAnimationDurationUserInfoKey] as? NSNumber)?.doubleValue ?? 0.25
-        composerBottom.constant = -kbH
+        composerBottom.constant = -composerLift()
         scroll.contentInset.bottom = max(kbH, view.safeAreaInsets.bottom)
         scroll.verticalScrollIndicatorInsets.bottom = kbH
         UIView.animate(withDuration: dur) { self.view.layoutIfNeeded() }
