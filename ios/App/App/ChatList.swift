@@ -349,6 +349,15 @@ final class LXChatData {
         f.formatOptions = [.withInternetDateTime]
         return f
     }()
+    /// 1010 她截图:他回完了顶上还亮着 typing to you。服务器自己落的时间带 6 位小数,系统只认到 3 位——
+    /// 认不出就当成"现在",重连补来的旧思考比不出早晚,被当成他又开始想了。截到 3 位再认(同 Moments.parseTs)
+    static func parseTs(_ s: String) -> Date? {
+        if let d = iso.date(from: s) ?? isoPlain.date(from: s) { return d }
+        guard let dot = s.firstIndex(of: "."),
+              let end = s[dot...].firstIndex(where: { $0 == "+" || $0 == "-" || $0 == "Z" }) else { return nil }
+        let frac = s[s.index(after: dot)..<end]
+        return iso.date(from: String(s[..<dot]) + "." + String(frac.prefix(3)) + String(s[end...]))
+    }
     static let cal: Calendar = {
         var c = Calendar(identifier: .gregorian)
         c.timeZone = TimeZone(identifier: "Asia/Shanghai") ?? .current
@@ -395,7 +404,7 @@ final class LXChatData {
             let on = (v as? Bool) ?? ((v as? NSNumber)?.boolValue ?? !(((v as? String) ?? "").isEmpty))
             if on { return nil }
         }
-        let date = iso.date(from: tss) ?? isoPlain.date(from: tss) ?? Date()
+        let date = parseTs(tss) ?? Date()
         let attArr = (meta["attachments"] as? [[String: Any]]) ?? []
         let atts = attArr.compactMap { a -> LXAtt? in
             guard let u = a["url"] as? String, !u.isEmpty else { return nil }
@@ -1280,13 +1289,13 @@ final class LXChatData {
             if (obj["done"] as? Bool) == true { return }
             if thinkStart == nil {
                 if let tss = obj["ts"] as? String,
-                   let dts = Self.iso.date(from: tss) ?? Self.isoPlain.date(from: tss),
+                   let dts = Self.parseTs(tss),
                    msgs.contains(where: { inSession($0) && $0.from == "ai" && $0.kind == "reply" && $0.ts >= dts }) {
                     return
                 }
                 thinkStart = Date()
                 if liveTurnWatermark == 0 { liveTurnWatermark = lastId }
-                liveThinkTs = (obj["ts"] as? String).flatMap { Self.iso.date(from: $0) ?? Self.isoPlain.date(from: $0) } ?? Date()
+                liveThinkTs = (obj["ts"] as? String).flatMap { Self.parseTs($0) } ?? Date()
                 liveThinkStartId = msgs.last(where: { inSession($0) && $0.from == "human" })?.id ?? 0
                 expandedThink.insert(Self.liveThinkId)
             }
