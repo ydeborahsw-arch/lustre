@@ -424,7 +424,9 @@ final class LXChatData {
         if let q = meta["quote"] as? [String: Any] {
             let f = quoteFields(q)
             qName = f.name; qText = f.text; qId = f.id
-        } else if let rt = (meta["reply_to"] as? NSNumber)?.int64Value {
+        } else if let rt = (meta["reply_to"] as? NSNumber)?.int64Value ?? Int64((meta["reply_to"] as? String) ?? ""), rt > 0 {
+            // 1017:服务器把 reply_to 存成字符串("79779"),这里原来只认数字,所以他引用她的那条原生从来没画出引用条;
+            // 名字和原话在 rebuild 里按 id 从列表补(resolveQuote),补不到才留"较早的一条消息"
             qName = "引用"
             qText = "较早的一条消息"
             qId = rt
@@ -1098,6 +1100,16 @@ final class LXChatData {
         liveTimer = Timer.scheduledTimer(withTimeInterval: 241, repeats: false) { [weak self] _ in self?.syncLive() }
     }
 
+    /// 1017 AI 发的引用只带 reply_to 的 id(网页 quoteInfoFor 同构):被引用那条已在列表里就把名字和原话补上,
+    /// 不在(翻得不够远)就留 parse 给的"较早的一条消息"
+    private func resolveQuote(_ m: LXMsg) -> LXMsg {
+        guard m.quoteName == "引用", m.quoteId != 0, let src = idx[m.quoteId] else { return m }
+        var r = m
+        r.quoteName = src.from == "human" ? "我" : "TA"
+        r.quoteText = String(src.text.prefix(80))
+        return r
+    }
+
     func rebuild(stick: Bool) {
         if let lts = liveThinkTs,
            msgs.contains(where: { inSession($0) && $0.kind == "thinking" && $0.ts >= lts }) {
@@ -1105,7 +1117,7 @@ final class LXChatData {
         }
         syncLive()
         var out: [LXRow] = []
-        let allVisible = mergeTurnThinking(order.compactMap { idx[$0] }.filter { inSession($0) && renderable($0) })
+        let allVisible = mergeTurnThinking(order.compactMap { idx[$0] }.filter { inSession($0) && renderable($0) }).map { resolveQuote($0) }
         lastVisible = allVisible
         let visible = thinkInSheet ? allVisible.filter { $0.kind != "thinking" } : allVisible
         let liveActive = (!thinkDraft.isEmpty || thinkStart != nil) && !thinkInSheet && !Self.blankChatPreview
@@ -7079,7 +7091,7 @@ public class ChatListPlugin: CAPPlugin, CAPBridgedPlugin, UITableViewDataSource,
         case .msg(let m, let st, let tl, let gp, let at):
             // 零花钱卡:收款改状态要重量重画;备注长短决定花钱卡高
             let pk: String = m.pocket.map { "\($0.role)/\($0.status)/\($0.note.hashValue)" } ?? "-"
-            return "m:\(m.echoId != 0 ? m.echoId : m.id):\(LXBubbleCell.voiceOpen.contains(m.id) ? 1 : 0):\(m.text.hashValue):\(m.attCount):\(m.reactions.joined(separator: " ").hashValue):\(m.quoteId != 0 ? 1 : 0):\(m.approveLine ?? "-"):\(st ? 1 : 0)\(tl ? 1 : 0)\(gp ? 1 : 0)\(at ? 1 : 0):\(theme.avatars ? 1 : 0):\(m.failed ? 1 : 0):\(pk)"
+            return "m:\(m.echoId != 0 ? m.echoId : m.id):\(LXBubbleCell.voiceOpen.contains(m.id) ? 1 : 0):\(m.text.hashValue):\(m.attCount):\(m.reactions.joined(separator: " ").hashValue):\(m.quoteId != 0 ? (m.quoteText?.hashValue ?? 1) : 0):\(m.approveLine ?? "-"):\(st ? 1 : 0)\(tl ? 1 : 0)\(gp ? 1 : 0)\(at ? 1 : 0):\(theme.avatars ? 1 : 0):\(m.failed ? 1 : 0):\(pk)"
         case .thinkHead(let m, let open, let label, let live): return "th:\(m.id):\(open ? 1 : 0):\(live ? 1 : 0):\(label):\(theme.avatars ? 1 : 0)"
         case .thinkBody(let m): return "tb:\(m.id):\(m.text.hashValue):\(theme.avatars ? 1 : 0)"
         case .foot: return "f"
