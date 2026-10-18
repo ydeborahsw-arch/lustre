@@ -2378,6 +2378,12 @@ final class LXBubbleTapGate: NSObject, UIGestureRecognizerDelegate {
     func gestureRecognizer(_ g: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
         cell?.shouldTakeBubbleTap(touch) ?? false
     }
+    /// 气泡里的字(label)自己还有一个点击手势(语音转文字用)。点在字上时它先认出来,气泡这一下就被它吃掉了——
+    /// 3025 她"单击气泡没反应"就是这个。让这两个点击同时成立:不是语音的那条,字的那下什么都不做,气泡的那下翻译。
+    func gestureRecognizer(_ g: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool {
+        guard let c = cell else { return false }
+        return other.view === c.label
+    }
 }
 
 final class LXBubbleCell: UITableViewCell {
@@ -6272,7 +6278,7 @@ public class ChatListPlugin: CAPPlugin, CAPBridgedPlugin, UITableViewDataSource,
                 self.data.thinkZh[id] = zh
                 self.data.translatedThink.insert(id)
             case .failure(let e):
-                self.toast("Translation failed: \(e.localizedDescription)")
+                self.toast(LXTranslate.describe(e))
             }
             self.refreshThink(id)
         }
@@ -6323,7 +6329,7 @@ public class ChatListPlugin: CAPPlugin, CAPBridgedPlugin, UITableViewDataSource,
                 LXBubbleCell.translated.insert(m.id)
                 self.refreshRow(m.id)
             case .failure(let e):
-                self.toast("Translation failed: \(e.localizedDescription)")
+                self.toast(LXTranslate.describe(e))
             }
         }
     }
@@ -8417,7 +8423,7 @@ final class LXThinkOverlay: UIView, UIGestureRecognizerDelegate {
                 self.fill(zh)
             case .failure(let e):
                 self.titleL.text = self.baseTitle
-                LXToast.show("Translation failed: \(e.localizedDescription)", host: self)
+                LXToast.show(LXTranslate.describe(e), host: self)
             }
         }
     }
@@ -8488,9 +8494,36 @@ enum LXTranslate {
         return l == .simplifiedChinese || l == .traditionalChinese
     }
 
+    /// 原文的主导语言(交给系统先备语言包用);认不出就 nil,让系统按文本自己认
+    static func dominant(_ text: String) -> Locale.Language? {
+        let r = NLLanguageRecognizer()
+        r.processString(String(text.prefix(1200)))
+        guard let l = r.dominantLanguage, l != .undetermined else { return nil }
+        return Locale.Language(identifier: l.rawValue)
+    }
+
+    /// 这一行要不要送去翻:空行、没有字母的行(分隔线/数字/表情)、汉字比别的字母多的行(已经是中文)都原样保留
+    static func worthTranslating(_ line: String) -> Bool {
+        var han = 0, other = 0
+        for u in line.unicodeScalars {
+            let v = u.value
+            if (0x4E00...0x9FFF).contains(v) || (0x3400...0x4DBF).contains(v) || (0x20000...0x2A6DF).contains(v) { han += 1 }
+            else if u.properties.isAlphabetic { other += 1 }
+        }
+        return other > 0 && other >= han
+    }
+
     static var available: Bool {
         if #available(iOS 18.0, *) { return true }
         return false
+    }
+
+    /// 给她看的失败提示:系统的错误说明,说明太笼统时后面带上错误码好查
+    static func describe(_ e: Error) -> String {
+        let ns = e as NSError
+        var s = "Translation failed: \(e.localizedDescription)"
+        if ns.domain.contains("Translation") { s += " (\(ns.code))" }
+        return s
     }
 
     /// 整段翻成简体中文。按行分开送、再按原样拼回,保住换行结构。主线程回调。
@@ -8528,25 +8561,42 @@ final class LXTranslator {
         host = h
     }
 
+    private static let target = Locale.Language(identifier: "zh-Hans")
+
     func translate(_ text: String, done: @escaping (Result<String, Error>) -> Void) {
         mount()
         guard host != nil else {
             done(.failure(NSError(domain: "LXTranslate", code: 2, userInfo: [NSLocalizedDescriptionKey: "No window"])))
             return
         }
-        model.queue.append(LXTranslatorJob(text: text, done: done))
-        // 配置一变(或 invalidate)SwiftUI 就重跑 translationTask,把队列里的活干完
-        if model.config == nil {
-            model.config = TranslationSession.Configuration(source: nil, target: Locale.Language(identifier: "zh-Hans"))
+        model.queue.append(LXTranslatorJob(text: text, source: LXTranslate.dominant(text), done: done))
+        startNext()
+    }
+
+    /// 一次只干一件:每件原文的语言可能不同,会话配置要按它来。配置一变(或 invalidate)SwiftUI 就重跑 translationTask。
+    /// (3025 的教训:配置里不给原文语言就让系统 prepareTranslation,它不知道备哪个语言包,直接报 "Unable to Translate")
+    private func startNext() {
+        guard model.current == nil, !model.queue.isEmpty else { return }
+        let job = model.queue.removeFirst()
+        model.current = job
+        if var c = model.config, c.source == job.source, c.target == Self.target {
+            c.invalidate(); model.config = c
         } else {
-            model.config?.invalidate()
+            model.config = TranslationSession.Configuration(source: job.source, target: Self.target)
         }
+    }
+
+    func finish(_ job: LXTranslatorJob, _ r: Result<String, Error>) {
+        job.done(r)
+        model.current = nil
+        startNext()
     }
 }
 
 @available(iOS 18.0, *)
 struct LXTranslatorJob {
     let text: String
+    let source: Locale.Language?
     let done: (Result<String, Error>) -> Void
 }
 
@@ -8554,6 +8604,7 @@ struct LXTranslatorJob {
 final class LXTranslatorModel: ObservableObject {
     @Published var config: TranslationSession.Configuration? = nil
     var queue: [LXTranslatorJob] = []
+    var current: LXTranslatorJob?
 }
 
 @available(iOS 18.0, *)
@@ -8564,35 +8615,37 @@ struct LXTranslatorView: View {
         Color.clear
             .frame(width: 1, height: 1)
             .translationTask(model.config) { session in
-                let jobs = await MainActor.run { () -> [LXTranslatorJob] in
-                    let j = model.queue; model.queue = []; return j
+                guard let job = await MainActor.run(body: { model.current }) else { return }
+                let tr = LXTranslator.shared
+                // 原文语言认出来了才让系统先备语言包(没装会弹下载提示);认不出就直接翻,系统按文本自己认
+                if job.source != nil {
+                    do { try await session.prepareTranslation() }
+                    catch { await MainActor.run { tr.finish(job, .failure(error)) }; return }
                 }
-                if jobs.isEmpty { return }
+                // 按行拆开送,译完按原顺序拼回;空行、已经是中文的行原样保留
+                let parts = job.text.components(separatedBy: "\n")
+                let idxs = parts.indices.filter { LXTranslate.worthTranslating(parts[$0]) }
+                if idxs.isEmpty { await MainActor.run { tr.finish(job, .success(job.text)) }; return }
+                var out = parts
+                var okCount = 0
+                var lastErr: Error?
                 do {
-                    // 语言包没装时这一步弹系统下载提示;装过就直接过
-                    try await session.prepareTranslation()
+                    let reqs = idxs.map { TranslationSession.Request(sourceText: parts[$0], clientIdentifier: String($0)) }
+                    let resp = try await session.translations(from: reqs)
+                    for r in resp {
+                        if let cid = r.clientIdentifier, let i = Int(cid), i < out.count { out[i] = r.targetText; okCount += 1 }
+                    }
                 } catch {
-                    await MainActor.run { jobs.forEach { $0.done(.failure(error)) } }
-                    return
+                    // 整批失败就一行一行来,哪行不行就保留那行原文
+                    lastErr = error
+                    for i in idxs {
+                        do { let r = try await session.translate(parts[i]); out[i] = r.targetText; okCount += 1 }
+                        catch { lastErr = error }
+                    }
                 }
-                for job in jobs {
-                    // 按行拆开送,译完按原顺序拼回;空行原样保留
-                    let parts = job.text.components(separatedBy: "\n")
-                    var reqs: [TranslationSession.Request] = []
-                    for (i, p) in parts.enumerated() where !p.trimmingCharacters(in: .whitespaces).isEmpty {
-                        reqs.append(TranslationSession.Request(sourceText: p, clientIdentifier: String(i)))
-                    }
-                    do {
-                        let resp = try await session.translations(from: reqs)
-                        var out = parts
-                        for r in resp {
-                            if let cid = r.clientIdentifier, let i = Int(cid), i < out.count { out[i] = r.targetText }
-                        }
-                        let joined = out.joined(separator: "\n")
-                        await MainActor.run { job.done(.success(joined)) }
-                    } catch {
-                        await MainActor.run { job.done(.failure(error)) }
-                    }
+                let joined = out.joined(separator: "\n")
+                await MainActor.run {
+                    if okCount == 0, let e = lastErr { tr.finish(job, .failure(e)) } else { tr.finish(job, .success(joined)) }
                 }
             }
     }
