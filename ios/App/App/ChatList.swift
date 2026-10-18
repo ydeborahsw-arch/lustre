@@ -2412,6 +2412,12 @@ final class LXBubbleCell: UITableViewCell {
     var onAttTap: ((LXAtt) -> Void)?
     var onAvatarTap: ((LXMsg) -> Void)?
     var onAvatarDoubleTap: ((LXMsg) -> Void)?
+    /// 1018 她:长按太慢 → 单击他的消息气泡直接翻译(再点收起)。只认他的、有文字、非语音的气泡;点在附件上不算
+    var onBubbleTap: ((LXMsg) -> Void)?
+    @objc private func bubbleTapped() {
+        guard let m = curMsg else { return }
+        onBubbleTap?(m)
+    }
     @objc private func avatarDoubleTapped() {
         guard let m = curMsg else { return }   // 0926:双击自己的头像也行(拍自己)
         onAvatarDoubleTap?(m)
@@ -2526,6 +2532,9 @@ final class LXBubbleCell: UITableViewCell {
         ])
         label.isUserInteractionEnabled = true
         label.addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(labelTapped)))
+        let bubTap = UITapGestureRecognizer(target: self, action: #selector(bubbleTapped))
+        bubTap.delegate = self
+        bubble.addGestureRecognizer(bubTap)
         bubble.addSubview(stackV)
         contentView.addSubview(timeL)
         contentView.addSubview(reactL)
@@ -3135,6 +3144,16 @@ final class LXStarFlower: UIView {
         capMask.path = UIBezierPath(ovalIn: CGRect(x: c.x - 2.5, y: c.y - 2.5, width: 5, height: 5)).cgPath
         cap.mask = capMask
         layer.addSublayer(cap)
+    }
+}
+
+extension LXBubbleCell: UIGestureRecognizerDelegate {
+    /// 只给气泡上那个"单击翻译"的手势把关:她自己的消息、语音、没字的不接;点在附件区的让附件自己接
+    public func gestureRecognizer(_ g: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
+        guard g.view === bubble else { return true }
+        guard let m = curMsg, m.from != "human", !Self.isVoice(m), !m.text.isEmpty else { return false }
+        if !attsV.isHidden, attsV.bounds.contains(touch.location(in: attsV)) { return false }
+        return true
     }
 }
 
@@ -6266,6 +6285,18 @@ public class ChatListPlugin: CAPPlugin, CAPBridgedPlugin, UITableViewDataSource,
         refreshPaintFingerprints()
     }
 
+    /// 1018 她:单击他的气泡 = 翻译/收起;多选模式下单击还是选中;菜单开着时那一下只是关菜单
+    func bubbleTapped(_ m: LXMsg) {
+        if menu != nil { return }
+        if multiOn {
+            if let t = table, let i = data.rows.firstIndex(where: { if case .msg(let x, _, _, _, _) = $0 { return x.id == m.id }; return false }) {
+                tableView(t, didSelectRowAt: rowIP(i))
+            }
+            return
+        }
+        toggleTranslation(m)
+    }
+
     /// 1018 她的单:长按他的消息 → Translate:原文下面一条细线接中文;再点 Hide translation 收起
     func toggleTranslation(_ m: LXMsg) {
         if LXBubbleCell.translated.contains(m.id) { LXBubbleCell.translated.remove(m.id); refreshRow(m.id); return }
@@ -7758,6 +7789,7 @@ public class ChatListPlugin: CAPPlugin, CAPBridgedPlugin, UITableViewDataSource,
             c.onAttTap = { [weak self] att in self?.attTapped(att) }
             c.onAvatarTap = { [weak self] m in self?.showThinkSheet(for: m) }
             c.onAvatarDoubleTap = { [weak self] m in self?.askPat(m) }
+            c.onBubbleTap = { [weak self] m in self?.bubbleTapped(m) }
             c.onVoiceTextTap = { [weak self] id in self?.toggleVoiceText(id) }
             c.onQuoteTap = { [weak self] qid in self?.jumpToMessage(qid) }
             c.setRing(multiOn && multiSel.contains(m.id), color: theme.accent)
