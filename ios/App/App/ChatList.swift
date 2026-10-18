@@ -8495,6 +8495,8 @@ enum LXTranslate {
     }
 
     /// 原文的主导语言(交给系统先备语言包用);认不出就 nil,让系统按文本自己认
+    /// (Locale.Language 是 iOS 16 的类型,工程最低 15,只在 iOS 18 的翻译器里用它)
+    @available(iOS 18.0, *)
     static func dominant(_ text: String) -> Locale.Language? {
         let r = NLLanguageRecognizer()
         r.processString(String(text.prefix(1200)))
