@@ -643,6 +643,7 @@ final class LXChatData {
             else if LustreConfig.previewFocus == "moments" { LXMomentsPreview.start() }
             else if LustreConfig.previewFocus == "radio" { LXRadioPreview.start() }
             else if LustreConfig.previewFocus == "sys" { LXSysPreview.start() }
+            else if LustreConfig.previewFocus == "probe" { ChatListPlugin.live?.previewCrashProbe() }
             else { ChatListPlugin.live?.previewAvaTimeCheck() }
         }
         let base = (msgs.last?.id ?? 0) + 1000
@@ -2370,6 +2371,15 @@ func lxProbeStack(_ host: UIView?, _ tag: String) {
 /// 头像模式下这一行画不画"头像正下方的时间"(画就画在本行框里,行高给它留位)
 enum LXAvaTime { case none, own }
 
+/// 1018:气泡"单击翻译"手势的把关人。单独一个 NSObject 做代理,问单元格要不要接这一下;
+/// 这样 LXBubbleCell 不用覆写系统父类的代理方法(见 tapGate 处的说明)
+final class LXBubbleTapGate: NSObject, UIGestureRecognizerDelegate {
+    weak var cell: LXBubbleCell?
+    func gestureRecognizer(_ g: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
+        cell?.shouldTakeBubbleTap(touch) ?? false
+    }
+}
+
 final class LXBubbleCell: UITableViewCell {
     static let reuse = "lxBubble"
     static let reuseGlass = "lxBubbleGlass"
@@ -2418,10 +2428,12 @@ final class LXBubbleCell: UITableViewCell {
         guard let m = curMsg else { return }
         onBubbleTap?(m)
     }
+    /// 气泡单击手势的代理是下面这个单独的小对象(不是单元格自己):单元格的父类 UITableViewCell 虽然声明了
+    /// UIGestureRecognizerDelegate,但未必真正实现那些方法;3024 里覆写它再 super 转交,落到 super 那条路就是
+    /// unrecognized selector 直接闪退。单元格自己一个代理方法都不碰,系统父类那套照旧。
+    private let tapGate = LXBubbleTapGate()
     /// 只给气泡上那个"单击翻译"的手势把关:她自己的消息、语音、没字的不接;点在附件区的让附件自己接。
-    /// (这个 SDK 里父类已经实现了 UIGestureRecognizerDelegate,所以是 override,别的手势照旧交给父类)
-    override func gestureRecognizer(_ g: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
-        guard g.view === bubble else { return super.gestureRecognizer(g, shouldReceive: touch) }
+    func shouldTakeBubbleTap(_ touch: UITouch) -> Bool {
         guard let m = curMsg, m.from != "human", !Self.isVoice(m), !m.text.isEmpty else { return false }
         if !attsV.isHidden, attsV.bounds.contains(touch.location(in: attsV)) { return false }
         return true
@@ -2541,7 +2553,8 @@ final class LXBubbleCell: UITableViewCell {
         label.isUserInteractionEnabled = true
         label.addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(labelTapped)))
         let bubTap = UITapGestureRecognizer(target: self, action: #selector(bubbleTapped))
-        bubTap.delegate = self
+        tapGate.cell = self
+        bubTap.delegate = tapGate
         bubble.addGestureRecognizer(bubTap)
         bubble.addSubview(stackV)
         contentView.addSubview(timeL)
@@ -6518,6 +6531,89 @@ public class ChatListPlugin: CAPPlugin, CAPBridgedPlugin, UITableViewDataSource,
             s.table?.isHidden = true
             p.superview?.bringSubviewToFront(p)
         }
+    }
+
+    /// 预览 probe 路线(1018):一张截图都不拍,只验"进聊天页会不会闪退"。列表从头到尾按页滚一遍(每一行都真建一次单元格),
+    /// 再按程序走一遍:思考卡标题翻译 → 气泡单击翻译 → 两个都再点一下收回 → 长按菜单。每一步 NSLog 一行 [probe],
+    /// 进程还活着就有最后一行 done。日志里只有行数和步骤名,没有任何正文。
+    private var crashProbeDone = false
+    func previewCrashProbe(tries: Int = 0) {
+        guard LustreConfig.isPreview, !crashProbeDone else { return }
+        guard let t = table, t.window != nil else {
+            if tries < 40 { DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in self?.previewCrashProbe(tries: tries + 1) } }
+            return
+        }
+        crashProbeDone = true
+        NSSetUncaughtExceptionHandler { e in
+            NSLog("%@", "[probe] EXCEPTION \(e.name.rawValue): \(e.reason ?? "")\n" + e.callStackSymbols.joined(separator: "\n"))
+        }
+        HomePlugin.live?.previewDismissEarly()
+        t.isHidden = false
+        NSLog("%@", "[probe] start rows=\(data.rows.count)")
+        var step = 0
+        func at(_ sec: Double, _ name: String, _ f: @escaping (UITableView) -> Void) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + sec) { [weak self] in
+                guard let s = self, let tv = s.table else { return }
+                step += 1
+                NSLog("%@", "[probe] \(step) \(name) begin")
+                f(tv)
+                tv.layoutIfNeeded()
+                NSLog("%@", "[probe] \(step) \(name) ok rows=\(s.data.rows.count) visible=\(tv.indexPathsForVisibleRows?.count ?? 0)")
+            }
+        }
+        func firstThink() -> Int64? {
+            for r in data.rows { if case .thinkHead(let m, _, _, let live) = r, !live { return m.id } }
+            return nil
+        }
+        func firstAI() -> LXMsg? {
+            for r in data.rows { if case .msg(let m, _, _, _, _) = r, m.from == "ai", !m.text.isEmpty, !LXBubbleCell.isVoice(m) { return m } }
+            return nil
+        }
+        at(2, "counts") { [weak self] _ in
+            guard let s = self else { return }
+            var th = 0, ai = 0, hu = 0
+            for r in s.data.rows {
+                if case .thinkHead = r { th += 1 }
+                if case .msg(let m, _, _, _, _) = r { if m.from == "ai" { ai += 1 } else { hu += 1 } }
+            }
+            NSLog("%@", "[probe] counts think=\(th) ai=\(ai) human=\(hu)")
+        }
+        at(4, "scroll-every-page") { tv in
+            let page = max(200, tv.bounds.height * 0.8)
+            let maxY = max(0, tv.contentSize.height - tv.bounds.height)
+            var y: CGFloat = 0, n = 0
+            while y <= maxY { tv.setContentOffset(CGPoint(x: 0, y: y), animated: false); tv.layoutIfNeeded(); y += page; n += 1 }
+            tv.setContentOffset(CGPoint(x: 0, y: maxY), animated: false); tv.layoutIfNeeded()
+            tv.setContentOffset(.zero, animated: false)
+            NSLog("%@", "[probe] scrolled pages=\(n) contentH=\(Int(tv.contentSize.height))")
+        }
+        at(8, "think-title-translate") { [weak self] _ in
+            guard let s = self, let id = firstThink() else { NSLog("%@", "[probe] no thinking row"); return }
+            s.thinkTitleTapped(id)
+        }
+        at(14, "bubble-tap-translate") { [weak self] _ in
+            guard let s = self, let m = firstAI() else { NSLog("%@", "[probe] no ai row"); return }
+            s.bubbleTapped(m)
+        }
+        at(24, "think-title-again") { [weak self] _ in
+            guard let s = self, let id = firstThink() else { return }
+            s.thinkTitleTapped(id)
+        }
+        at(28, "bubble-tap-again") { [weak self] _ in
+            guard let s = self, let m = firstAI() else { return }
+            s.bubbleTapped(m)
+        }
+        at(34, "long-press-menu") { [weak self] tv in
+            guard let s = self else { return }
+            for ip in tv.indexPathsForVisibleRows ?? [] {
+                guard let c = tv.cellForRow(at: ip) as? LXBubbleCell else { continue }
+                if case .msg(let m, _, _, _, _) = s.data.rows[s.dataIdx(ip.row)], m.from == "ai", !m.text.isEmpty {
+                    s.showMenu(m, bubble: c.bubble); NSLog("%@", "[probe] menu shown"); return
+                }
+            }
+            NSLog("%@", "[probe] no visible ai bubble for menu")
+        }
+        at(44, "done") { _ in NSLog("%@", "[probe] done alive") }
     }
 
     /// 预览 bubbles 路线 75 秒起(1001):输入框里的引用条,引用是样板字。聊天列表一直藏着,屏幕上只有顶栏、输入栏和底色;
