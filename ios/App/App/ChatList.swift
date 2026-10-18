@@ -2418,6 +2418,14 @@ final class LXBubbleCell: UITableViewCell {
         guard let m = curMsg else { return }
         onBubbleTap?(m)
     }
+    /// 只给气泡上那个"单击翻译"的手势把关:她自己的消息、语音、没字的不接;点在附件区的让附件自己接。
+    /// (这个 SDK 里父类已经实现了 UIGestureRecognizerDelegate,所以是 override,别的手势照旧交给父类)
+    override func gestureRecognizer(_ g: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
+        guard g.view === bubble else { return super.gestureRecognizer(g, shouldReceive: touch) }
+        guard let m = curMsg, m.from != "human", !Self.isVoice(m), !m.text.isEmpty else { return false }
+        if !attsV.isHidden, attsV.bounds.contains(touch.location(in: attsV)) { return false }
+        return true
+    }
     @objc private func avatarDoubleTapped() {
         guard let m = curMsg else { return }   // 0926:双击自己的头像也行(拍自己)
         onAvatarDoubleTap?(m)
@@ -3144,16 +3152,6 @@ final class LXStarFlower: UIView {
         capMask.path = UIBezierPath(ovalIn: CGRect(x: c.x - 2.5, y: c.y - 2.5, width: 5, height: 5)).cgPath
         cap.mask = capMask
         layer.addSublayer(cap)
-    }
-}
-
-extension LXBubbleCell: UIGestureRecognizerDelegate {
-    /// 只给气泡上那个"单击翻译"的手势把关:她自己的消息、语音、没字的不接;点在附件区的让附件自己接
-    public func gestureRecognizer(_ g: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
-        guard g.view === bubble else { return true }
-        guard let m = curMsg, m.from != "human", !Self.isVoice(m), !m.text.isEmpty else { return false }
-        if !attsV.isHidden, attsV.bounds.contains(touch.location(in: attsV)) { return false }
-        return true
     }
 }
 
