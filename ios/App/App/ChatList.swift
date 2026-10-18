@@ -5,6 +5,10 @@ import WebKit
 import AVFoundation
 import MediaPlayer
 import PhotosUI
+import SwiftUI
+import Combine
+import NaturalLanguage
+import Translation
 
 
 struct LXAtt {
@@ -1031,12 +1035,20 @@ final class LXChatData {
         settleLiveState(fresh, bumped: bumped)
     }
 
+    /// 1018 她的单:思考卡标题点一下 → 正文翻成中文。按思考消息 id 记"现在显示中文的"/"翻译中的"/译文缓存
+    var translatedThink = Set<Int64>()
+    var translatingThink = Set<Int64>()
+    var thinkZh: [Int64: String] = [:]
+
     func thinkLabel(_ m: LXMsg, live: Bool) -> String {
         if live {
             let sec = max(1, Int(Date().timeIntervalSince(thinkStart ?? Date())))
             return "Thinking for \(sec)s…"
         }
-        return m.durSec > 0 ? "Thought for \(m.durSec)s" : "Thought process"
+        var base = m.durSec > 0 ? "Thought for \(m.durSec)s" : "Thought process"
+        if translatingThink.contains(m.id) { base += " · Translating…" }
+        else if translatedThink.contains(m.id) { base += " · Translated" }
+        return base
     }
 
 
@@ -1131,7 +1143,15 @@ final class LXChatData {
             if m.kind == "thinking" {
                 let open = expandedThink.contains(m.id)
                 out.append(.thinkHead(m, open: open, label: thinkLabel(m, live: false), live: false))
-                if open { out.append(.thinkBody(m)) }
+                if open {
+                    // 1018:标题点过"翻译"的,正文行换成译文(tb: 键含正文 hash,高度自动重算)
+                    if translatedThink.contains(m.id), let zh = thinkZh[m.id] {
+                        var mm = m; mm.text = zh
+                        out.append(.thinkBody(mm))
+                    } else {
+                        out.append(.thinkBody(m))
+                    }
+                }
                 continue
             }
             var tail = true
@@ -2363,6 +2383,11 @@ final class LXBubbleCell: UITableViewCell {
     }
     let bubble = LXBubbleView()
     let label = UILabel()
+    /// 1018 她的单:长按 Translate 后,原文下面一条细线 + 中文(都排在气泡里 label 的下面)
+    let transSep = UIView()
+    let transL = UILabel()
+    static var translated = Set<Int64>()
+    static var zh: [Int64: String] = [:]
     let timeL = UILabel()
     let stackV = UIStackView()
     let attsV = UIStackView()
@@ -2488,6 +2513,17 @@ final class LXBubbleCell: UITableViewCell {
         contentView.addSubview(qStrip)
         stackV.addArrangedSubview(attsV)
         stackV.addArrangedSubview(label)
+        transL.numberOfLines = 0
+        transSep.isHidden = true; transL.isHidden = true
+        stackV.addArrangedSubview(transSep)
+        stackV.addArrangedSubview(transL)
+        stackV.setCustomSpacing(8, after: label)
+        stackV.setCustomSpacing(8, after: transSep)
+        NSLayoutConstraint.activate([
+            transSep.heightAnchor.constraint(equalToConstant: 0.5),
+            transSep.widthAnchor.constraint(equalTo: stackV.widthAnchor),
+            transL.widthAnchor.constraint(lessThanOrEqualTo: stackV.widthAnchor),
+        ])
         label.isUserInteractionEnabled = true
         label.addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(labelTapped)))
         bubble.addSubview(stackV)
@@ -2859,6 +2895,11 @@ final class LXBubbleCell: UITableViewCell {
                 maxWC.priority = UILayoutPriority(999)
                 if cellW > 10 {
                     bubWC.constant = Self.measuredWidth(m, cellW: cellW, attOnly: false, maxWOverride: cellW - 2 * Self.avaInset, av: true)
+                    // 1018:带译文时气泡宽按原文/译文里更宽的那个量
+                    if Self.translated.contains(m.id), let zh = Self.zh[m.id] {
+                        var mz = m; mz.text = zh
+                        bubWC.constant = max(bubWC.constant, Self.measuredWidth(mz, cellW: cellW, attOnly: false, maxWOverride: cellW - 2 * Self.avaInset, av: true))
+                    }
                     bubWC.isActive = true
                     label.preferredMaxLayoutWidth = max(1, bubWC.constant - 2 * p)
                 } else { bubWC.isActive = false; label.preferredMaxLayoutWidth = 0 }
@@ -2870,6 +2911,16 @@ final class LXBubbleCell: UITableViewCell {
                 maxWC.priority = UILayoutPriority(1)
                 bubWC.isActive = false
             }
+        }
+        // 1018 她的单:译文块。只有长按点过 Translate 的那条才现身;字和原文同一套字号/行距,前面一条很淡的细线
+        if m.from != "human", Self.translated.contains(m.id), let zh = Self.zh[m.id] {
+            let boxedT = theme.avatars && !m.text.isEmpty
+            transSep.isHidden = false; transL.isHidden = false
+            transSep.backgroundColor = theme.aiFg.withAlphaComponent(0.22)
+            transL.attributedText = Self.styled(zh, base: Self.bubbleFont(boxedT), color: theme.aiFg, lineGap: boxedT ? Self.avaLine : 26.7, tg: boxedT)
+            transL.preferredMaxLayoutWidth = label.preferredMaxLayoutWidth
+        } else {
+            transSep.isHidden = true; transL.isHidden = true
         }
         if timeUnderAva {
             timeLeftC.priority = UILayoutPriority(1); timeRightC.priority = UILayoutPriority(1)
@@ -3093,6 +3144,8 @@ final class LXThinkHeadCell: UITableViewCell {
     let flower = LXStarFlower()
     let lab = UILabel()
     private var starLeadC: NSLayoutConstraint!
+    /// 1018:点标题文字 = 翻译(行的其余地方照旧是开/关)
+    var onTitleTap: (() -> Void)?
 
     static func fourStar(filled: Bool) -> UIImage {
         let S: CGFloat = 13
@@ -3124,6 +3177,8 @@ final class LXThinkHeadCell: UITableViewCell {
         lab.translatesAutoresizingMaskIntoConstraints = false
         lab.font = UIFont(name: "AnthropicSansWebVariable-TextRegular", size: 12.5) ?? UIFont.systemFont(ofSize: 12.5)
         contentView.addSubview(star); contentView.addSubview(flower); contentView.addSubview(lab)
+        lab.isUserInteractionEnabled = true
+        lab.addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(titleTapped)))
         starLeadC = star.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 16)
         NSLayoutConstraint.activate([
             starLeadC,
@@ -3138,6 +3193,7 @@ final class LXThinkHeadCell: UITableViewCell {
         ])
     }
     required init?(coder: NSCoder) { fatalError() }
+    @objc private func titleTapped() { onTitleTap?() }
     func configure(label: String, open: Bool, live: Bool, theme: LXChatTheme) {
         starLeadC.constant = theme.avatars ? LXBubbleCell.avaInset : 16
         lab.text = label
@@ -4763,6 +4819,15 @@ final class LXMsgMenu: UIView {
                 p.addArc(withCenter: CGPoint(x: 7 * s, y: 5 * s), radius: 2 * s, startAngle: .pi, endAngle: -.pi / 2, clockwise: true)
                 p.addLine(to: CGPoint(x: 17 * s, y: 3 * s))
                 c.addPath(p.cgPath); c.strokePath()
+            case "translate":
+                // 左上一个 A,右下一个"文"的轮廓
+                line([(3, 14), (6.5, 4), (10, 14)])
+                line([(4.3, 10.5), (8.7, 10.5)])
+                line([(13, 10), (21, 10)])
+                line([(17, 7.5), (17, 10)])
+                line([(14, 13), (20, 13)])
+                line([(19.5, 13), (14.5, 21)])
+                line([(15.5, 15.5), (20, 20.5)])
             case "delete":
                 line([(4, 7), (20, 7)])
                 line([(10, 11), (10, 17)])
@@ -4872,17 +4937,21 @@ final class LXMsgMenu: UIView {
         }
         let fg = white < 0.5 ? UIColor(white: 0.93, alpha: 1) : UIColor(white: 0.12, alpha: 1)
         let danger = UIColor(red: 0.878, green: 0.353, blue: 0.302, alpha: 1)
+        // 1018 她:菜单里的字全部用英文(含新加的 Translate)
         var items: [(String, String, UIColor)] = [
-            ("quote", "引用", fg), ("multi", "多选", fg), ("star", "收藏", fg),
+            ("quote", "Reply", fg), ("multi", "Select", fg), ("star", "Archive", fg),
         ]
         let voice = LXBubbleCell.isVoice(msg)
         if voice {
-            items.append(("stt", LXBubbleCell.voiceOpen.contains(msg.id) ? "收起文字" : "转文字", fg))
-            if msg.from == "ai" { items.append(("radio", "放进电台", fg)) }   // 1005 她的单:长按他的语音放进电台
+            items.append(("stt", LXBubbleCell.voiceOpen.contains(msg.id) ? "Hide transcript" : "Transcribe", fg))
+            if msg.from == "ai" { items.append(("radio", "Add to Radio", fg)) }   // 1005 她的单:长按他的语音放进电台
         }
         if !msg.text.isEmpty && (!voice || LXBubbleCell.voiceOpen.contains(msg.id)) {
             items.append(("seltext", "Select text", fg))
             items.append(("copy", "Copy", fg))
+            if msg.from == "ai" {   // 1018 她的单:他的消息翻成中文(手机自带翻译,离线)
+                items.append(("translate", LXBubbleCell.translated.contains(msg.id) ? "Hide translation" : "Translate", fg))
+            }
         }
         items.append(("delete", "Delete", danger))
         for (id, title, color) in items {
@@ -6143,6 +6212,91 @@ public class ChatListPlugin: CAPPlugin, CAPBridgedPlugin, UITableViewDataSource,
         }
     }
 
+    /// 1018 她的单:点思考卡标题 → 思考正文翻成中文,再点变回原文;卡关着就先照旧打开再翻
+    func thinkTitleTapped(_ id: Int64) {
+        if !data.expandedThink.contains(id) {
+            if let i = data.rows.firstIndex(where: { if case .thinkHead(let m, _, _, _) = $0 { return m.id == id }; return false }), let t = table {
+                tableView(t, didSelectRowAt: rowIP(i))
+            }
+            if data.translatedThink.contains(id) { return }   // 翻过的,打开来就是中文
+        } else if data.translatedThink.contains(id) {
+            data.translatedThink.remove(id)
+            refreshThink(id)
+            return
+        }
+        if data.thinkZh[id] != nil {
+            data.translatedThink.insert(id); refreshThink(id); return
+        }
+        guard LXTranslate.available else { toast("Needs iOS 18"); return }
+        var src = ""
+        for r in data.rows { if case .thinkHead(let m, _, _, _) = r, m.id == id { src = m.text; break } }
+        guard !src.isEmpty else { return }
+        if LXTranslate.isChinese(src) { toast("Already in Chinese"); return }
+        if data.translatingThink.contains(id) { return }
+        data.translatingThink.insert(id); refreshThink(id)
+        LXTranslate.toChinese(src) { [weak self] r in
+            guard let self = self else { return }
+            self.data.translatingThink.remove(id)
+            switch r {
+            case .success(let zh):
+                self.data.thinkZh[id] = zh
+                self.data.translatedThink.insert(id)
+            case .failure(let e):
+                self.toast("Translation failed: \(e.localizedDescription)")
+            }
+            self.refreshThink(id)
+        }
+    }
+
+    /// 只重配这张思考卡的头和正文两行(行数不变),不整页重画
+    private func refreshThink(_ id: Int64) {
+        data.rebuildQuiet()
+        guard let t = table else { return }
+        UIView.performWithoutAnimation {
+            for (i, r) in data.rows.enumerated() {
+                switch r {
+                case .thinkHead(let m, _, _, _) where m.id == id, .thinkBody(let m) where m.id == id:
+                    let ip = rowIP(i)
+                    if ip.row < t.numberOfRows(inSection: 0) { reconfigureVisible(t, at: ip) }
+                default: break
+                }
+            }
+            t.beginUpdates(); t.endUpdates()
+        }
+        refreshPaintFingerprints()
+    }
+
+    /// 1018 她的单:长按他的消息 → Translate:原文下面一条细线接中文;再点 Hide translation 收起
+    func toggleTranslation(_ m: LXMsg) {
+        if LXBubbleCell.translated.contains(m.id) { LXBubbleCell.translated.remove(m.id); refreshRow(m.id); return }
+        if LXBubbleCell.zh[m.id] != nil { LXBubbleCell.translated.insert(m.id); refreshRow(m.id); return }
+        guard LXTranslate.available else { toast("Needs iOS 18"); return }
+        if LXTranslate.isChinese(m.text) { toast("Already in Chinese"); return }
+        toast("Translating…")
+        LXTranslate.toChinese(m.text) { [weak self] r in
+            guard let self = self else { return }
+            switch r {
+            case .success(let zh):
+                LXBubbleCell.zh[m.id] = zh
+                LXBubbleCell.translated.insert(m.id)
+                self.refreshRow(m.id)
+            case .failure(let e):
+                self.toast("Translation failed: \(e.localizedDescription)")
+            }
+        }
+    }
+
+    private func refreshRow(_ id: Int64) {
+        guard let t = table, let i = data.rows.firstIndex(where: { if case .msg(let m, _, _, _, _) = $0 { return m.id == id }; return false }) else { return }
+        let ip = rowIP(i)
+        guard ip.row < t.numberOfRows(inSection: 0) else { return }
+        UIView.performWithoutAnimation {
+            reconfigureVisible(t, at: ip)
+            t.beginUpdates(); t.endUpdates()
+        }
+        refreshPaintFingerprints()
+    }
+
     func showThinkSheet(for m: LXMsg) {
         let thoughts = data.thinkingForGroup(startingAt: m.id)
         guard !thoughts.isEmpty else { LXToast.show("这几条没有思考过程", host: bridge?.viewController?.view); return }
@@ -7091,7 +7245,7 @@ public class ChatListPlugin: CAPPlugin, CAPBridgedPlugin, UITableViewDataSource,
         case .msg(let m, let st, let tl, let gp, let at):
             // 零花钱卡:收款改状态要重量重画;备注长短决定花钱卡高
             let pk: String = m.pocket.map { "\($0.role)/\($0.status)/\($0.note.hashValue)" } ?? "-"
-            return "m:\(m.echoId != 0 ? m.echoId : m.id):\(LXBubbleCell.voiceOpen.contains(m.id) ? 1 : 0):\(m.text.hashValue):\(m.attCount):\(m.reactions.joined(separator: " ").hashValue):\(m.quoteId != 0 ? (m.quoteText?.hashValue ?? 1) : 0):\(m.approveLine ?? "-"):\(st ? 1 : 0)\(tl ? 1 : 0)\(gp ? 1 : 0)\(at ? 1 : 0):\(theme.avatars ? 1 : 0):\(m.failed ? 1 : 0):\(pk)"
+            return "m:\(m.echoId != 0 ? m.echoId : m.id):\(LXBubbleCell.voiceOpen.contains(m.id) ? 1 : 0):\(LXBubbleCell.translated.contains(m.id) ? (LXBubbleCell.zh[m.id]?.hashValue ?? 1) : 0):\(m.text.hashValue):\(m.attCount):\(m.reactions.joined(separator: " ").hashValue):\(m.quoteId != 0 ? (m.quoteText?.hashValue ?? 1) : 0):\(m.approveLine ?? "-"):\(st ? 1 : 0)\(tl ? 1 : 0)\(gp ? 1 : 0)\(at ? 1 : 0):\(theme.avatars ? 1 : 0):\(m.failed ? 1 : 0):\(pk)"
         case .thinkHead(let m, let open, let label, let live): return "th:\(m.id):\(open ? 1 : 0):\(live ? 1 : 0):\(label):\(theme.avatars ? 1 : 0)"
         case .thinkBody(let m): return "tb:\(m.id):\(m.text.hashValue):\(theme.avatars ? 1 : 0)"
         case .foot: return "f"
@@ -7608,9 +7762,11 @@ public class ChatListPlugin: CAPPlugin, CAPBridgedPlugin, UITableViewDataSource,
             c.onQuoteTap = { [weak self] qid in self?.jumpToMessage(qid) }
             c.setRing(multiOn && multiSel.contains(m.id), color: theme.accent)
             return c
-        case .thinkHead(_, let open, let label, let live):
+        case .thinkHead(let m, let open, let label, let live):
             let c = tableView.dequeueReusableCell(withIdentifier: LXThinkHeadCell.reuse, for: indexPath) as! LXThinkHeadCell
             c.configure(label: label, open: open, live: live, theme: theme)
+            let tid = m.id
+            c.onTitleTap = live ? nil : { [weak self] in self?.thinkTitleTapped(tid) }
             return c
         case .thinkBody(let m):
             let c = tableView.dequeueReusableCell(withIdentifier: LXThinkBodyCell.reuse, for: indexPath) as! LXThinkBodyCell
@@ -7756,6 +7912,8 @@ public class ChatListPlugin: CAPPlugin, CAPBridgedPlugin, UITableViewDataSource,
         case "stt":
             if m.text.isEmpty { toast("这条还没转出文字"); return }
             toggleVoiceText(m.id)
+        case "translate":
+            toggleTranslation(m)
         case "radio":
             LXRadioNet.add(msgId: m.id) { [weak self] ok in self?.toast(ok ? "放进电台了" : "没放进去，再试一次") }
         case "copy":
@@ -7952,6 +8110,14 @@ final class LXThinkOverlay: UIView, UIGestureRecognizerDelegate {
     private var hC: NSLayoutConstraint!
     private var startH: CGFloat = 0
     private static weak var live: LXThinkOverlay?
+    /// 1018 她的单:点卡的标题 → 整卡思考翻成中文,再点变回原文
+    private let titleL = UILabel()
+    private let theme: LXChatTheme
+    private let origText: String
+    private let baseTitle: String
+    private var zhText: String?
+    private var showingZh = false
+    private var translating = false
 
     static func show(host: UIView, title: String, text: String, theme: LXChatTheme) {
         live?.removeFromSuperview()
@@ -7975,6 +8141,9 @@ final class LXThinkOverlay: UIView, UIGestureRecognizerDelegate {
     private var largeH: CGFloat { bounds.height - safeAreaInsets.top - 12 }
 
     init(title: String, text: String, theme: LXChatTheme) {
+        self.theme = theme
+        self.origText = text
+        self.baseTitle = title
         super.init(frame: .zero)
         scrim.backgroundColor = UIColor(white: 0, alpha: 0.28)
         scrim.alpha = 0
@@ -7999,8 +8168,10 @@ final class LXThinkOverlay: UIView, UIGestureRecognizerDelegate {
         let grab = UIView()
         grab.backgroundColor = theme.faint.withAlphaComponent(0.5)
         grab.layer.cornerRadius = 2.5
-        let t = UILabel()
+        let t = titleL
         t.text = title
+        t.isUserInteractionEnabled = true
+        t.addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(titleTapped)))
         t.font = LXDrawerTint.font(17, wght: 650)
         // 0926:卡有自己的底,字用卡的墨。theme.aiFg 会跟着壁纸变(浅壁纸=近黑),放在深色卡上就看不见了
         t.textColor = LXSheetInk.text
@@ -8020,6 +8191,38 @@ final class LXThinkOverlay: UIView, UIGestureRecognizerDelegate {
             content.trailingAnchor.constraint(equalTo: tv.contentLayoutGuide.trailingAnchor),
             content.widthAnchor.constraint(equalTo: tv.frameLayoutGuide.widthAnchor),
         ])
+        fill(text)
+        for v in [scrim, card] as [UIView] { v.translatesAutoresizingMaskIntoConstraints = false; addSubview(v) }
+        for v in [grab, t, tv] as [UIView] { v.translatesAutoresizingMaskIntoConstraints = false; card.addSubview(v) }
+        hC = card.heightAnchor.constraint(equalToConstant: 0)
+        NSLayoutConstraint.activate([
+            scrim.topAnchor.constraint(equalTo: topAnchor), scrim.bottomAnchor.constraint(equalTo: bottomAnchor),
+            scrim.leadingAnchor.constraint(equalTo: leadingAnchor), scrim.trailingAnchor.constraint(equalTo: trailingAnchor),
+            card.leadingAnchor.constraint(equalTo: leadingAnchor),
+            card.trailingAnchor.constraint(equalTo: trailingAnchor),
+            card.bottomAnchor.constraint(equalTo: bottomAnchor),
+            hC,
+            grab.topAnchor.constraint(equalTo: card.topAnchor, constant: 8),
+            grab.centerXAnchor.constraint(equalTo: card.centerXAnchor),
+            grab.widthAnchor.constraint(equalToConstant: 36),
+            grab.heightAnchor.constraint(equalToConstant: 5),
+            t.topAnchor.constraint(equalTo: card.topAnchor, constant: 28),
+            t.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: 24),
+            t.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -24),
+            tv.topAnchor.constraint(equalTo: t.bottomAnchor, constant: 16),
+            tv.leadingAnchor.constraint(equalTo: card.leadingAnchor),
+            tv.trailingAnchor.constraint(equalTo: card.trailingAnchor),
+            tv.bottomAnchor.constraint(equalTo: card.bottomAnchor),
+        ])
+        let pan = UIPanGestureRecognizer(target: self, action: #selector(onPan(_:)))
+        pan.delegate = self
+        card.addGestureRecognizer(pan)
+    }
+    required init?(coder: NSCoder) { fatalError() }
+
+    /// 把一段思考铺进卡里(原文或译文都走这里;重铺前先清空)
+    private func fill(_ text: String) {
+        content.arrangedSubviews.forEach { $0.removeFromSuperview() }
         let steps = LXThinkBodyCell.splitSteps(text)
         // 只认"行首是工具 emoji / 工具名"的才算调工具;正文里提到"心率""提醒"之类不算
         func isTool(_ st: String) -> Bool {
@@ -8063,33 +8266,35 @@ final class LXThinkOverlay: UIView, UIGestureRecognizerDelegate {
                 content.addArrangedSubview(l)
             }
         }
-        for v in [scrim, card] as [UIView] { v.translatesAutoresizingMaskIntoConstraints = false; addSubview(v) }
-        for v in [grab, t, tv] as [UIView] { v.translatesAutoresizingMaskIntoConstraints = false; card.addSubview(v) }
-        hC = card.heightAnchor.constraint(equalToConstant: 0)
-        NSLayoutConstraint.activate([
-            scrim.topAnchor.constraint(equalTo: topAnchor), scrim.bottomAnchor.constraint(equalTo: bottomAnchor),
-            scrim.leadingAnchor.constraint(equalTo: leadingAnchor), scrim.trailingAnchor.constraint(equalTo: trailingAnchor),
-            card.leadingAnchor.constraint(equalTo: leadingAnchor),
-            card.trailingAnchor.constraint(equalTo: trailingAnchor),
-            card.bottomAnchor.constraint(equalTo: bottomAnchor),
-            hC,
-            grab.topAnchor.constraint(equalTo: card.topAnchor, constant: 8),
-            grab.centerXAnchor.constraint(equalTo: card.centerXAnchor),
-            grab.widthAnchor.constraint(equalToConstant: 36),
-            grab.heightAnchor.constraint(equalToConstant: 5),
-            t.topAnchor.constraint(equalTo: card.topAnchor, constant: 28),
-            t.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: 24),
-            t.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -24),
-            tv.topAnchor.constraint(equalTo: t.bottomAnchor, constant: 16),
-            tv.leadingAnchor.constraint(equalTo: card.leadingAnchor),
-            tv.trailingAnchor.constraint(equalTo: card.trailingAnchor),
-            tv.bottomAnchor.constraint(equalTo: card.bottomAnchor),
-        ])
-        let pan = UIPanGestureRecognizer(target: self, action: #selector(onPan(_:)))
-        pan.delegate = self
-        card.addGestureRecognizer(pan)
     }
-    required init?(coder: NSCoder) { fatalError() }
+
+    /// 1018 她的单:点标题 = 原文/中文来回切;第一次先翻(手机自带翻译),翻着的时候标题后面跟 Translating…
+    @objc private func titleTapped() {
+        if showingZh {
+            showingZh = false; titleL.text = baseTitle; fill(origText); return
+        }
+        if let zh = zhText {
+            showingZh = true; titleL.text = baseTitle + " · Translated"; fill(zh); return
+        }
+        guard LXTranslate.available else { LXToast.show("Needs iOS 18", host: self); return }
+        if LXTranslate.isChinese(origText) { LXToast.show("Already in Chinese", host: self); return }
+        if translating { return }
+        translating = true
+        titleL.text = baseTitle + " · Translating…"
+        LXTranslate.toChinese(origText) { [weak self] r in
+            guard let self = self else { return }
+            self.translating = false
+            switch r {
+            case .success(let zh):
+                self.zhText = zh; self.showingZh = true
+                self.titleL.text = self.baseTitle + " · Translated"
+                self.fill(zh)
+            case .failure(let e):
+                self.titleL.text = self.baseTitle
+                LXToast.show("Translation failed: \(e.localizedDescription)", host: self)
+            }
+        }
+    }
 
     func gestureRecognizer(_ g: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool {
         other === tv.panGestureRecognizer
@@ -8143,4 +8348,126 @@ final class LXBlockTarget: NSObject {
     let f: () -> Void
     init(_ f: @escaping () -> Void) { self.f = f }
     @objc func fire() { f() }
+}
+
+// MARK: - 1018 她的单:翻译(思考卡标题点一下翻中文 / 他的消息长按 Translate)
+/// 引擎 = 系统自带的翻译(Translation 框架,和"翻译"App 同一套模型):全在手机上做,不经服务器,不花额度;
+/// 需要 iOS 18。第一次用系统会弹一次语言包下载。
+enum LXTranslate {
+    /// 文本是不是已经是中文(按主导语言判)
+    static func isChinese(_ text: String) -> Bool {
+        let r = NLLanguageRecognizer()
+        r.processString(String(text.prefix(400)))
+        guard let l = r.dominantLanguage else { return false }
+        return l == .simplifiedChinese || l == .traditionalChinese
+    }
+
+    static var available: Bool {
+        if #available(iOS 18.0, *) { return true }
+        return false
+    }
+
+    /// 整段翻成简体中文。按行分开送、再按原样拼回,保住换行结构。主线程回调。
+    static func toChinese(_ text: String, done: @escaping (Result<String, Error>) -> Void) {
+        guard #available(iOS 18.0, *) else {
+            done(.failure(NSError(domain: "LXTranslate", code: 1, userInfo: [NSLocalizedDescriptionKey: "Needs iOS 18"])))
+            return
+        }
+        LXTranslator.shared.translate(text, done: done)
+    }
+}
+
+@available(iOS 18.0, *)
+final class LXTranslator {
+    static let shared = LXTranslator()
+    private let model = LXTranslatorModel()
+    private var host: UIHostingController<LXTranslatorView>?
+
+    /// 翻译会话只能从 SwiftUI 的 .translationTask 里拿,系统的语言包下载提示也要有视图层级才弹得出来:
+    /// 挂一个 1×1 的宿主在根控制器下面,常驻
+    private func mount() {
+        if host != nil { return }
+        let win = UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .flatMap { $0.windows }
+            .first { $0.isKeyWindow }
+        guard let w = win, let root = w.rootViewController else { return }
+        let h = UIHostingController(rootView: LXTranslatorView(model: model))
+        h.view.backgroundColor = .clear
+        h.view.isUserInteractionEnabled = false
+        h.view.frame = CGRect(x: 0, y: 0, width: 1, height: 1)
+        root.addChild(h)
+        root.view.addSubview(h.view)
+        h.didMove(toParent: root)
+        host = h
+    }
+
+    func translate(_ text: String, done: @escaping (Result<String, Error>) -> Void) {
+        mount()
+        guard host != nil else {
+            done(.failure(NSError(domain: "LXTranslate", code: 2, userInfo: [NSLocalizedDescriptionKey: "No window"])))
+            return
+        }
+        model.queue.append(LXTranslatorJob(text: text, done: done))
+        // 配置一变(或 invalidate)SwiftUI 就重跑 translationTask,把队列里的活干完
+        if model.config == nil {
+            model.config = TranslationSession.Configuration(source: nil, target: Locale.Language(identifier: "zh-Hans"))
+        } else {
+            model.config?.invalidate()
+        }
+    }
+}
+
+@available(iOS 18.0, *)
+struct LXTranslatorJob {
+    let text: String
+    let done: (Result<String, Error>) -> Void
+}
+
+@available(iOS 18.0, *)
+final class LXTranslatorModel: ObservableObject {
+    @Published var config: TranslationSession.Configuration? = nil
+    var queue: [LXTranslatorJob] = []
+}
+
+@available(iOS 18.0, *)
+struct LXTranslatorView: View {
+    @ObservedObject var model: LXTranslatorModel
+
+    var body: some View {
+        Color.clear
+            .frame(width: 1, height: 1)
+            .translationTask(model.config) { session in
+                let jobs = await MainActor.run { () -> [LXTranslatorJob] in
+                    let j = model.queue; model.queue = []; return j
+                }
+                if jobs.isEmpty { return }
+                do {
+                    // 语言包没装时这一步弹系统下载提示;装过就直接过
+                    try await session.prepareTranslation()
+                } catch {
+                    await MainActor.run { jobs.forEach { $0.done(.failure(error)) } }
+                    return
+                }
+                for job in jobs {
+                    // 按行拆开送,译完按原顺序拼回;空行原样保留
+                    let parts = job.text.components(separatedBy: "\n")
+                    var reqs: [TranslationSession.Request] = []
+                    for (i, p) in parts.enumerated() where !p.trimmingCharacters(in: .whitespaces).isEmpty {
+                        reqs.append(TranslationSession.Request(sourceText: p, clientIdentifier: String(i)))
+                    }
+                    do {
+                        let resp = try await session.translations(from: reqs)
+                        var out = parts
+                        for r in resp {
+                            if let cid = r.clientIdentifier, let i = Int(cid), i < out.count { out[i] = r.targetText }
+                        }
+                        let joined = out.joined(separator: "\n")
+                        await MainActor.run { job.done(.success(joined)) }
+                    } catch {
+                        await MainActor.run { job.done(.failure(error)) }
+                    }
+                }
+            }
+    }
 }
