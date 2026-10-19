@@ -77,8 +77,10 @@ jobs:
             # The app hides the chat list in this route, so these shots hold nothing but the bar.
             # From about 120 s the app covers the page with a solid colour and a magenta square and long-presses
             # a fake message (keyboard up, then down) to show where the message menu lands.
+            # From about 168 s a second cover shows the emoji input bar above the keyboard on a sample message:
+            # empty, then three emoji typed, then (after Done, keyboard down) the pill under the bubble, then reopened prefilled.
             sleep 5
-            for t in $(seq 10 5 170); do sleep 5; shot c$t; done
+            for t in $(seq 10 5 215); do sleep 5; shot c$t; done
           elif [ "$LX_PREVIEW_FOCUS" = "coread" ]; then
             # The reading room opens full screen over everything with a sample book and sample notes only (no account data).
             # It steps through 15 screens, 16 s each, starting about 6 s after the chat finishes loading.

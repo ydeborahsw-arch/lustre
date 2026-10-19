@@ -43,6 +43,8 @@ struct LXMsg {
     var durSec: Int = 0
     var atts: [LXAtt] = []
     var reactions: [String] = []
+    /// 1019:她自己贴的那串表情(可以不止一个),再点"+"时带进小输入框里改
+    var myReaction: String = ""
     var starred = false
     var approveLine: String? = nil
     var quoteName: String? = nil
@@ -418,7 +420,7 @@ final class LXChatData {
                          size: (a["size"] as? NSNumber)?.intValue ?? 0,
                          duration: (a["duration"] as? NSNumber)?.intValue ?? 0)
         }
-        let rx = (meta["reactions"] as? [String: Any])?.compactMap { $0.value as? String }.filter { !$0.isEmpty } ?? []
+        let (rx, rxMine) = rxSplit(meta["reactions"])
         var line: String? = nil
         if let w = meta["widget"] as? [String: Any], let u = w["url"] as? String, u.contains("/term/approve") {
             line = u.contains("line=yan") ? "yan" : "zhao"
@@ -446,8 +448,18 @@ final class LXChatData {
                       cid: (meta["cid"] as? String) ?? "",
                       patAct: (meta["act"] as? String) ?? "",
                       patSelf: (meta["self"] as? Bool) ?? false)
+        m.myReaction = rxMine
         if kind == "transfer" || kind == "spend" { m.pocket = LXPocketInfo.from(meta) }
         return m
+    }
+
+    /// meta.reactions({"human": "❤️😘", "ai": "😘"}) → 气泡下表情章的顺序(她的在前、他的在后)+ 她自己贴的那串
+    /// (1019 她的单:她贴的可以是好几个,存成一串;顺序钉死,不再跟字典的随机顺序走)
+    static func rxSplit(_ raw: Any?) -> (all: [String], mine: String) {
+        let d = raw as? [String: Any] ?? [:]
+        let mine = (d["human"] as? String) ?? ""
+        let his = (d["ai"] as? String) ?? ""
+        return ([mine, his].filter { !$0.isEmpty }, mine)
     }
 
     private func inSession(_ m: LXMsg) -> Bool {
@@ -1382,8 +1394,8 @@ final class LXChatData {
             onCompact?()
         case "reaction":
             guard let idn = obj["id"] as? NSNumber else { return }
-            let rx = (obj["reactions"] as? [String: Any])?.compactMap { $0.value as? String }.filter { !$0.isEmpty } ?? []
-            patch(idn.int64Value) { $0.reactions = rx }
+            let (rx, rxMine) = Self.rxSplit(obj["reactions"])
+            patch(idn.int64Value) { $0.reactions = rx; $0.myReaction = rxMine }
         default:
             break
         }
@@ -5057,23 +5069,32 @@ final class LXEmojiField: UITextField {
     }
 }
 
+/// 贴表情的小输入框(1019 她的单:"能不能不止一个?像小型输入框,我确认了再一起贴上去")。
+/// 键盘上面一条:左边框里是打进来的表情(打开时带着她已经贴的那串),退格删最后一个,右边 Done(或键盘回车)才一起贴上;
+/// 点别处就算了。最多 12 个,只收表情(切到字母键盘打的字不收)。
 final class LXEmojiPicker: UIView, UITextFieldDelegate {
     static var shared: LXEmojiPicker?
+    static let maxN = 12
     private let field = LXEmojiField()
     private var onPick: ((String) -> Void)?
+    private var buf = ""
+    private let show = UILabel()
+    private let hint = UILabel()
 
-    static func present(host: UIView, onPick: @escaping (String) -> Void) {
+    static func present(host: UIView, theme: LXChatTheme, prefill: String, onPick: @escaping (String) -> Void) {
         shared?.finish(nil)
         let p = LXEmojiPicker(frame: host.bounds)
         p.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         p.backgroundColor = UIColor(white: 0, alpha: 0.18)
         p.onPick = onPick
+        p.buf = String(prefill.prefix(maxN))
         p.field.delegate = p
         p.field.autocorrectionType = .no
         p.field.spellCheckingType = .no
         p.field.tintColor = .clear
         p.field.alpha = 0.02
         p.field.frame = CGRect(x: 8, y: 8, width: 1, height: 1)
+        p.field.inputAccessoryView = p.makeBar(width: host.bounds.width, theme: theme)
         p.addSubview(p.field)
         p.addGestureRecognizer(UITapGestureRecognizer(target: p, action: #selector(cancelTap)))
         host.addSubview(p)
@@ -5081,15 +5102,104 @@ final class LXEmojiPicker: UIView, UITextFieldDelegate {
         shared = p
         p.alpha = 0
         UIView.animate(withDuration: 0.18) { p.alpha = 1 }
+        p.refresh()
         p.field.becomeFirstResponder()
     }
+
+    /// 键盘上面那条:材质跟长按菜单一样(iOS 26 玻璃,之前厚磨砂),左边一个框、右边 Done
+    private func makeBar(width: CGFloat, theme: LXChatTheme) -> UIView {
+        var white: CGFloat = 0
+        theme.bg.getWhite(&white, alpha: nil)
+        let dark = white < 0.5
+        let bar = UIView(frame: CGRect(x: 0, y: 0, width: width, height: 56))
+        bar.autoresizingMask = [.flexibleWidth]
+        let mat: UIVisualEffectView
+        if #available(iOS 26.0, *) {
+            let g = UIVisualEffectView(effect: UIGlassEffect())
+            g.overrideUserInterfaceStyle = dark ? .dark : .light
+            mat = g
+        } else {
+            mat = UIVisualEffectView(effect: UIBlurEffect(style: dark ? .systemThickMaterialDark : .systemThickMaterialLight))
+        }
+        mat.frame = bar.bounds
+        mat.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        bar.addSubview(mat)
+        let fg = dark ? UIColor(white: 0.93, alpha: 1) : UIColor(white: 0.12, alpha: 1)
+        let box = UIView()
+        box.translatesAutoresizingMaskIntoConstraints = false
+        box.backgroundColor = fg.withAlphaComponent(dark ? 0.10 : 0.07)
+        box.layer.cornerRadius = 20
+        box.layer.borderWidth = 1
+        box.layer.borderColor = theme.hairline.cgColor
+        bar.addSubview(box)
+        show.translatesAutoresizingMaskIntoConstraints = false
+        show.font = UIFont.systemFont(ofSize: 24)
+        show.textColor = fg
+        show.lineBreakMode = .byTruncatingHead
+        box.addSubview(show)
+        hint.translatesAutoresizingMaskIntoConstraints = false
+        hint.font = UIFont.systemFont(ofSize: 15)
+        hint.textColor = fg.withAlphaComponent(0.45)
+        hint.text = "Emoji…"
+        box.addSubview(hint)
+        let done = UIButton(type: .system)
+        done.translatesAutoresizingMaskIntoConstraints = false
+        done.setTitle("Done", for: .normal)
+        done.titleLabel?.font = UIFont.systemFont(ofSize: 17, weight: .semibold)
+        done.setTitleColor(theme.accentText, for: .normal)
+        done.addAction(UIAction { [weak self] _ in self?.confirm() }, for: .touchUpInside)
+        bar.addSubview(done)
+        NSLayoutConstraint.activate([
+            box.leadingAnchor.constraint(equalTo: bar.leadingAnchor, constant: 10),
+            box.centerYAnchor.constraint(equalTo: bar.centerYAnchor),
+            box.heightAnchor.constraint(equalToConstant: 40),
+            done.leadingAnchor.constraint(equalTo: box.trailingAnchor, constant: 10),
+            done.trailingAnchor.constraint(equalTo: bar.trailingAnchor, constant: -14),
+            done.centerYAnchor.constraint(equalTo: bar.centerYAnchor),
+            done.widthAnchor.constraint(greaterThanOrEqualToConstant: 52),
+            show.leadingAnchor.constraint(equalTo: box.leadingAnchor, constant: 12),
+            show.trailingAnchor.constraint(lessThanOrEqualTo: box.trailingAnchor, constant: -12),
+            show.centerYAnchor.constraint(equalTo: box.centerYAnchor),
+            hint.leadingAnchor.constraint(equalTo: box.leadingAnchor, constant: 14),
+            hint.centerYAnchor.constraint(equalTo: box.centerYAnchor),
+        ])
+        return bar
+    }
+
+    private func refresh() {
+        show.text = buf
+        hint.isHidden = !buf.isEmpty
+        field.text = buf   // 藏着的输入框里留着同样的字,退格才会报到代理这里来
+    }
+
+    /// 只收表情:单个码点本身就是表情的(😘),或多码点拼成的(❤️、旗子、肤色/ZWJ 组合);数字字母不收
+    private static func isEmoji(_ c: Character) -> Bool {
+        guard let f = c.unicodeScalars.first else { return false }
+        if f.properties.isEmojiPresentation { return true }
+        return c.unicodeScalars.count > 1 && f.properties.isEmoji
+    }
+    private func insert(_ s: String) {
+        for ch in s where Self.isEmoji(ch) {
+            guard buf.count < Self.maxN else { break }
+            buf.append(ch)
+        }
+    }
+
     func textField(_ tf: UITextField, shouldChangeCharactersIn range: NSRange, replacementString s: String) -> Bool {
-        if let first = s.first { finish(String(first)) }
+        if s.isEmpty { if !buf.isEmpty { buf.removeLast() } } else { insert(s) }
+        refresh()
         return false
     }
-    func textFieldShouldReturn(_ tf: UITextField) -> Bool { finish(nil); return false }
+    func textFieldShouldReturn(_ tf: UITextField) -> Bool { confirm(); return false }
     func textFieldDidEndEditing(_ tf: UITextField) { finish(nil) }
     @objc private func cancelTap() { finish(nil) }
+    private func confirm() { finish(buf) }
+
+    /// 预览专用:按程序打字 / 按 Done / 收掉
+    func previewInsert(_ s: String) { insert(s); refresh() }
+    func previewConfirm() { confirm() }
+    func previewCancel() { finish(nil) }
+
     private func finish(_ e: String?) {
         guard Self.shared === self else { return }
         Self.shared = nil
@@ -5097,7 +5207,7 @@ final class LXEmojiPicker: UIView, UITextFieldDelegate {
         onPick = nil
         if field.isFirstResponder { field.resignFirstResponder() }
         UIView.animate(withDuration: 0.18, animations: { self.alpha = 0 }) { _ in self.removeFromSuperview() }
-        if let e = e, !e.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { cb?(e) }
+        if let e = e { cb?(e) }   // 空串也送出去 = 把她贴的撤掉;点别处取消才是 nil
     }
 }
 
@@ -6708,6 +6818,7 @@ public class ChatListPlugin: CAPPlugin, CAPBridgedPlugin, UITableViewDataSource,
             NativeInputPlugin.live?.previewComposer(text: "Preview\nSecond line\nThird line")
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 118) { [weak self] in self?.previewMenuCheck() }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 168) { [weak self] in self?.previewReactCheck() }
     }
 
     /// 预览专用(路线 composer,118 秒起)。0928 她:键盘开着长按,菜单卡落到输入栏和键盘后面引用不了。
@@ -6757,6 +6868,56 @@ public class ChatListPlugin: CAPPlugin, CAPBridgedPlugin, UITableViewDataSource,
         scene(30, from: "ai", keyboard: false)
         DispatchQueue.main.asyncAfter(deadline: .now() + 48) { [weak self] in
             self?.closeMenu()
+            cover.removeFromSuperview()
+        }
+    }
+
+    /// 预览里贴表情不发网络:这条闭包把结果画到样板气泡上
+    private var previewReactApply: ((String) -> Void)?
+    /// 预览专用(路线 composer,168 秒起)。1019 她的单:贴表情改成小输入框。整页盖纯色+品红记号,一条假的 AI 消息(真单元格)
+    /// 放在上面:170 秒 点"+"后键盘上面的小框(空的)、176 秒 打进三个表情、186 秒 Done 之后气泡下的多表情章(键盘收起)、
+    /// 196 秒 再点"+":框里带着已贴的三个;208 秒 收掉
+    private func previewReactCheck() {
+        guard LustreConfig.isPreview, let cont = container else { return }
+        NativeInputPlugin.live?.tv?.resignFirstResponder()
+        let cover = UIView(frame: cont.bounds)
+        cover.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        cover.backgroundColor = UIColor(white: 0.16, alpha: 1)
+        let mark = UIView(frame: CGRect(x: 4, y: 70, width: 20, height: 20))
+        mark.backgroundColor = .magenta
+        cover.addSubview(mark)
+        cont.addSubview(cover)
+        var m = LXMsg(id: 900_000_002, from: "ai", kind: "reply", text: "样板:要贴好几个表情的一条",
+                      ts: Date(), session: "", attCount: 0)
+        let w = cont.bounds.width
+        let th = theme
+        let cell = LXBubbleCell(style: .default, reuseIdentifier: nil)
+        func draw() {
+            cell.configure(m, showTime: false, tail: true, grouped: false, theme: th, cellW: w, avaTime: .none)
+            cell.bounds = CGRect(x: 0, y: 0, width: w, height: 900)
+            cell.setNeedsLayout(); cell.layoutIfNeeded()
+            let h = ceil(cell.systemLayoutSizeFitting(CGSize(width: w, height: UIView.layoutFittingCompressedSize.height),
+                                                      withHorizontalFittingPriority: .required,
+                                                      verticalFittingPriority: .fittingSizeLevel).height)
+            cell.frame = CGRect(x: 0, y: 110, width: w, height: h)
+            if cell.superview == nil { cover.addSubview(cell) }
+        }
+        draw()
+        previewReactApply = { e in
+            m.reactions = e.isEmpty ? [] : [e]
+            m.myReaction = e
+            draw()
+        }
+        func plus(_ at: Double) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + at) { [weak self] in self?.menuAct("emojiKb", m) }
+        }
+        plus(2)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 8) { LXEmojiPicker.shared?.previewInsert("❤️😘🔥") }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 18) { LXEmojiPicker.shared?.previewConfirm() }
+        plus(28)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 40) { [weak self] in
+            LXEmojiPicker.shared?.previewCancel()
+            self?.previewReactApply = nil
             cover.removeFromSuperview()
         }
     }
@@ -8029,13 +8190,15 @@ public class ChatListPlugin: CAPPlugin, CAPBridgedPlugin, UITableViewDataSource,
         closeMenu()
         if act == "emojiKb" {
             guard let host = bridge?.viewController?.view else { return }
-            LXEmojiPicker.present(host: host) { [weak self] e in self?.menuAct("react:" + e, m) }
+            // 1019 她的单:小输入框,带着她已经贴的那串进去,Done 才一起贴
+            LXEmojiPicker.present(host: host, theme: theme, prefill: m.myReaction) { [weak self] e in self?.menuAct("react:" + e, m) }
             return
         }
         if act.hasPrefix("react:") {
-            let emoji = String(act.dropFirst(6))
-            let already = m.reactions.contains(emoji)
-            data.post("/app/react", ["id": m.id, "emoji": already ? "" : emoji]) { [weak self] ok in
+            let emojis = String(act.dropFirst(6))   // 她那串整个换掉;空串 = 把她贴的撤掉
+            if emojis == m.myReaction { return }
+            if LustreConfig.isPreview { previewReactApply?(emojis); return }   // 预览不发网络,画到样板气泡上
+            data.post("/app/react", ["id": m.id, "emoji": emojis]) { [weak self] ok in
                 if !ok { self?.toast("没贴上，再试试") }
             }
             return
