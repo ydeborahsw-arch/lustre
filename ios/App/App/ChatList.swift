@@ -5106,62 +5106,62 @@ final class LXEmojiPicker: UIView, UITextFieldDelegate {
         p.field.becomeFirstResponder()
     }
 
-    /// 键盘上面那条:材质跟长按菜单一样(iOS 26 玻璃,之前厚磨砂),左边一个框、右边 Done
+    /// 键盘上面只放一个圆框(1019 她:"边缘好难受,不能直接一个框吗"):底透明,没有整条的板子;
+    /// 框的材质照 Message 药丸(UIGlassEffect .regular、40 高圆角 20、旧系统厚磨砂+1 描边),Done 在框里右端
     private func makeBar(width: CGFloat, theme: LXChatTheme) -> UIView {
         var white: CGFloat = 0
         theme.bg.getWhite(&white, alpha: nil)
         let dark = white < 0.5
         let bar = UIView(frame: CGRect(x: 0, y: 0, width: width, height: 56))
         bar.autoresizingMask = [.flexibleWidth]
-        let mat: UIVisualEffectView
+        bar.backgroundColor = .clear
+        let box: UIVisualEffectView
         if #available(iOS 26.0, *) {
-            let g = UIVisualEffectView(effect: UIGlassEffect())
+            let g = UIVisualEffectView(effect: UIGlassEffect(style: .regular))
+            g.cornerConfiguration = .uniformCorners(radius: .fixed(20))
             g.overrideUserInterfaceStyle = dark ? .dark : .light
-            mat = g
+            box = g
         } else {
-            mat = UIVisualEffectView(effect: UIBlurEffect(style: dark ? .systemThickMaterialDark : .systemThickMaterialLight))
+            box = UIVisualEffectView(effect: UIBlurEffect(style: dark ? .systemThickMaterialDark : .systemThickMaterialLight))
+            box.layer.borderWidth = 1
+            box.layer.borderColor = theme.hairline.cgColor
         }
-        mat.frame = bar.bounds
-        mat.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-        bar.addSubview(mat)
-        let fg = dark ? UIColor(white: 0.93, alpha: 1) : UIColor(white: 0.12, alpha: 1)
-        let box = UIView()
         box.translatesAutoresizingMaskIntoConstraints = false
-        box.backgroundColor = fg.withAlphaComponent(dark ? 0.10 : 0.07)
         box.layer.cornerRadius = 20
-        box.layer.borderWidth = 1
-        box.layer.borderColor = theme.hairline.cgColor
+        box.layer.cornerCurve = .continuous
+        box.clipsToBounds = true
         bar.addSubview(box)
+        let inner = box.contentView
+        let fg = dark ? UIColor(white: 0.93, alpha: 1) : UIColor(white: 0.12, alpha: 1)
         show.translatesAutoresizingMaskIntoConstraints = false
         show.font = UIFont.systemFont(ofSize: 24)
         show.textColor = fg
         show.lineBreakMode = .byTruncatingHead
-        box.addSubview(show)
+        inner.addSubview(show)
         hint.translatesAutoresizingMaskIntoConstraints = false
         hint.font = UIFont.systemFont(ofSize: 15)
         hint.textColor = fg.withAlphaComponent(0.45)
         hint.text = "Emoji…"
-        box.addSubview(hint)
+        inner.addSubview(hint)
         let done = UIButton(type: .system)
         done.translatesAutoresizingMaskIntoConstraints = false
         done.setTitle("Done", for: .normal)
         done.titleLabel?.font = UIFont.systemFont(ofSize: 17, weight: .semibold)
         done.setTitleColor(theme.accentText, for: .normal)
         done.addAction(UIAction { [weak self] _ in self?.confirm() }, for: .touchUpInside)
-        bar.addSubview(done)
+        inner.addSubview(done)
         NSLayoutConstraint.activate([
-            box.leadingAnchor.constraint(equalTo: bar.leadingAnchor, constant: 10),
+            box.leadingAnchor.constraint(equalTo: bar.leadingAnchor, constant: 12),
+            box.trailingAnchor.constraint(equalTo: bar.trailingAnchor, constant: -12),
             box.centerYAnchor.constraint(equalTo: bar.centerYAnchor),
             box.heightAnchor.constraint(equalToConstant: 40),
-            done.leadingAnchor.constraint(equalTo: box.trailingAnchor, constant: 10),
-            done.trailingAnchor.constraint(equalTo: bar.trailingAnchor, constant: -14),
-            done.centerYAnchor.constraint(equalTo: bar.centerYAnchor),
-            done.widthAnchor.constraint(greaterThanOrEqualToConstant: 52),
-            show.leadingAnchor.constraint(equalTo: box.leadingAnchor, constant: 12),
-            show.trailingAnchor.constraint(lessThanOrEqualTo: box.trailingAnchor, constant: -12),
-            show.centerYAnchor.constraint(equalTo: box.centerYAnchor),
-            hint.leadingAnchor.constraint(equalTo: box.leadingAnchor, constant: 14),
-            hint.centerYAnchor.constraint(equalTo: box.centerYAnchor),
+            done.trailingAnchor.constraint(equalTo: inner.trailingAnchor, constant: -16),
+            done.centerYAnchor.constraint(equalTo: inner.centerYAnchor),
+            show.leadingAnchor.constraint(equalTo: inner.leadingAnchor, constant: 16),
+            show.trailingAnchor.constraint(lessThanOrEqualTo: done.leadingAnchor, constant: -10),
+            show.centerYAnchor.constraint(equalTo: inner.centerYAnchor),
+            hint.leadingAnchor.constraint(equalTo: inner.leadingAnchor, constant: 18),
+            hint.centerYAnchor.constraint(equalTo: inner.centerYAnchor),
         ])
         return bar
     }
