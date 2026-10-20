@@ -2514,15 +2514,17 @@ public class NativeInputPlugin: CAPPlugin, CAPBridgedPlugin, UITextViewDelegate 
     static let effortKey = "lx.effort"
 
     // 0929 她:列表里的 4.6 早就说好是 1M 那版。少了 [1m] 就是 20 万的窗口,上下文超了一切过去就被强制压缩
+    // 1020 她:普通 4.6 和 4.6 1M 两个都放进来(现在的套餐里 1M 要另付额度,普通的才能直接用)
     static let modelNames: [(val: String, name: String)] = [
         ("claude-fable-5-1", "Fable 5.1"), ("claude-opus-5-5", "Opus 5.5"),
-        ("claude-opus-5", "Opus 5"), ("claude-opus-4-6[1m]", "Opus 4.6"),
+        ("claude-opus-5", "Opus 5"), ("claude-opus-4-6", "Opus 4.6"), ("claude-opus-4-6[1m]", "Opus 4.6 1M"),
         // 1001 她:Sonnet 5.5 先放进来,终端升级后直接能用(升级前终端不认识它,按 20 万窗口算)
         ("claude-opus-4-5", "Opus 4.5"), ("claude-sonnet-5-5", "Sonnet 5.5"),
         ("claude-sonnet-4-6", "Sonnet 4.6"),
     ]
 
     static func prettyModel(_ raw: String) -> String {
+        if let n = modelNames.first(where: { $0.val == raw })?.name { return n }
         let base = raw.replacingOccurrences(of: "[1m]", with: "")
         if let n = modelNames.first(where: { $0.val.replacingOccurrences(of: "[1m]", with: "") == base })?.name { return n }
         guard base.hasPrefix("claude-") else { return raw }
@@ -2540,10 +2542,15 @@ public class NativeInputPlugin: CAPPlugin, CAPBridgedPlugin, UITextViewDelegate 
         let cur = LXSessionsAPI.modelBySid[sid].flatMap { $0.isEmpty ? nil : $0 }
             ?? LXUsage.model(for: sid)
         let eff = UserDefaults.standard.string(forKey: effortKey) ?? "max"
-        let models: [[String: Any]] = modelNames.map {
-            // 两边都去掉 [1m] 再比:列表里的 4.6 带 [1m],只去一边它永远勾不上
-            ["val": $0.val, "name": $0.name,
-             "active": $0.val.replacingOccurrences(of: "[1m]", with: "") == cur.replacingOccurrences(of: "[1m]", with: "")]
+        // 1020:4.6 有普通和 1M 两个。cur 正好等于哪个就只勾哪个;
+        // cur 来自 transcript 时从不带 [1m],那就两边去掉 [1m] 再比,只勾第一个对上的(普通版排在前面)
+        let exactHit = modelNames.contains { $0.val == cur }
+        let curBase = cur.replacingOccurrences(of: "[1m]", with: "")
+        let firstBase: Int? = curBase.isEmpty ? nil
+            : modelNames.firstIndex(where: { $0.val.replacingOccurrences(of: "[1m]", with: "") == curBase })
+        let models: [[String: Any]] = modelNames.enumerated().map { i, m in
+            ["val": m.val, "name": m.name,
+             "active": exactHit ? (m.val == cur) : (i == firstBase)]
         }
         let efforts: [[String: Any]] = effortNames.map {
             ["val": $0.val, "name": $0.name, "active": $0.val == eff]
