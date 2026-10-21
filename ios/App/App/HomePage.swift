@@ -558,6 +558,8 @@ final class HVCard: HomeCard {
     /// 分期图的框:左右滑换天时新旧两张图在里面平移,框外裁掉
     private let chartBox = UIView()
     private var chart: HVSleepChart?
+    /// 1021 她 #86671:时间轴下面保留每个阶段的合计那一排(Deep / REM / Core / Awake·次数)
+    private let legend = UIStackView()
     private let stats = UIStackView()
     private var days: [[String: Any]] = []
     private var selIdx = 0
@@ -595,6 +597,10 @@ final class HVCard: HomeCard {
         chartBox.addGestureRecognizer(toOlder)
         chartBox.addGestureRecognizer(toNewer)
 
+        legend.axis = .horizontal
+        legend.distribution = .equalSpacing
+        legend.isHidden = true
+
         let rule = UIView()
         rule.backgroundColor = theme.hairline
         rule.heightAnchor.constraint(equalToConstant: 1).isActive = true
@@ -603,11 +609,12 @@ final class HVCard: HomeCard {
         stats.distribution = .equalCentering
         stats.spacing = 6
 
-        let col = UIStackView(arrangedSubviews: [head.row, sleepRow, chartBox, rule, stats])
+        let col = UIStackView(arrangedSubviews: [head.row, sleepRow, chartBox, legend, rule, stats])
         col.axis = .vertical
         col.setCustomSpacing(10, after: head.row)
         col.setCustomSpacing(12, after: sleepRow)
-        col.setCustomSpacing(14, after: chartBox)
+        col.setCustomSpacing(10, after: chartBox)
+        col.setCustomSpacing(14, after: legend)
         col.setCustomSpacing(11, after: rule)
         col.translatesAutoresizingMaskIntoConstraints = false
         content.addSubview(col)
@@ -708,6 +715,7 @@ final class HVCard: HomeCard {
             bigLab.text = "没读到"; dayLab.text = "—"
             chart?.removeFromSuperview(); chart = nil; chartDate = ""
             chartBox.isHidden = true
+            legend.isHidden = true
             return
         }
         let date = (rec["date"] as? String) ?? ""
@@ -726,6 +734,44 @@ final class HVCard: HomeCard {
         if user { roller.roll(key: "sleepBig", to: sleepMin.rounded(), dur: 0.6, apply: paint) }
         else { roller.set(key: "sleepBig", to: sleepMin.rounded(), apply: paint) }
         renderChart(rec, dir: dir)
+        renderLegend(rec)
+    }
+
+    private func hm(_ m: Int) -> String {
+        m >= 60 ? "\(m / 60)h\(String(format: "%02d", m % 60))m" : "\(m)m"
+    }
+
+    private func renderLegend(_ rec: [String: Any]) {
+        func mins(_ k: String) -> Int { Int(((rec[k] as? NSNumber)?.doubleValue ?? 0).rounded()) }
+        let deep = mins("sleepDeepMin"), rem = mins("sleepRemMin"), core = mins("sleepCoreMin"), awake = mins("sleepAwakeMin")
+        let segs = rec["sleepSegments"] as? [[String: Any]] ?? []
+        let awakeN = segs.filter { ($0["t"] as? String) == "awake" }.count
+        legend.arrangedSubviews.forEach { $0.removeFromSuperview() }
+        guard deep + rem + core > 0 else { legend.isHidden = true; return }
+        legend.isHidden = false
+        func item(_ c: UIColor, _ name: String, _ v: String) -> UILabel {
+            let dot = NSTextAttachment()
+            dot.image = UIGraphicsImageRenderer(size: CGSize(width: 7, height: 7)).image { ctx in
+                ctx.cgContext.setFillColor(c.cgColor)
+                ctx.cgContext.fillEllipse(in: CGRect(x: 0, y: 0, width: 7, height: 7))
+            }
+            dot.bounds = CGRect(x: 0, y: -0.5, width: 7, height: 7)
+            let s = NSMutableAttributedString(attachment: dot)
+            s.append(NSAttributedString(string: " \(name) ",
+                attributes: [.font: LXDrawerTint.font(10), .foregroundColor: theme.textFaint]))
+            s.append(NSAttributedString(string: v,
+                attributes: [.font: LXDrawerTint.font(10, wght: 600), .foregroundColor: theme.textSoft]))
+            let l = UILabel()
+            l.attributedText = s
+            l.adjustsFontSizeToFitWidth = true
+            return l
+        }
+        legend.addArrangedSubview(item(HVSleepChart.cDeep, "Deep", hm(deep)))
+        legend.addArrangedSubview(item(HVSleepChart.cRem, "REM", hm(rem)))
+        legend.addArrangedSubview(item(HVSleepChart.cCore, "Core", hm(core)))
+        if awake > 0 {
+            legend.addArrangedSubview(item(HVSleepChart.cAwake, "Awake", hm(awake) + (awakeN > 0 ? "·\(awakeN)x" : "")))
+        }
     }
 
     private var chartSegSig = ""
@@ -3187,7 +3233,12 @@ enum LXSleepPreview {
         func day(_ date: String, _ segs: [[String: Any]]) -> [String: Any] {
             let asleep = segs.filter { ($0["t"] as? String) != "awake" }
                 .reduce(0) { $0 + (($1["e"] as? Int ?? 0) - ($1["s"] as? Int ?? 0)) }
-            return ["date": date, "sleepHours": (Double(asleep) / 360).rounded() / 10, "sleepSegments": segs]
+            func m(_ t: String) -> Int {
+                segs.filter { ($0["t"] as? String) == t }
+                    .reduce(0) { $0 + (($1["e"] as? Int ?? 0) - ($1["s"] as? Int ?? 0)) } / 60
+            }
+            return ["date": date, "sleepHours": (Double(asleep) / 360).rounded() / 10, "sleepSegments": segs,
+                    "sleepDeepMin": m("deep"), "sleepRemMin": m("rem"), "sleepCoreMin": m("core"), "sleepAwakeMin": m("awake")]
         }
         let days = [day("2026-10-19", d1), day("2026-10-20", d2), day("2026-10-21", d3)]
         let latest: [String: Any] = ["stepsToday": 4321, "activeKcalToday": 210, "restingHeartRate": 62, "hrvSDNN": 41]
