@@ -597,7 +597,7 @@ final class LXChatData {
     /// 1003 预览 pocket 路线(只拍零花钱卡)
     static var pocketPreview: Bool { LustreConfig.isPreview && LustreConfig.previewFocus == "pocket" }
     /// 这几条预览路线会拍到聊天页:真消息、正在想、正在打的字都不画
-    static var blankChatPreview: Bool { pocketPreview || (LustreConfig.isPreview && (LustreConfig.previewFocus == "radio" || LustreConfig.previewFocus == "sys")) }
+    static var blankChatPreview: Bool { pocketPreview || (LustreConfig.isPreview && (LustreConfig.previewFocus == "radio" || LustreConfig.previewFocus == "sys" || LustreConfig.previewFocus == "sleep")) }
     private var pocketDemoIds = Set<Int64>()
 
     /// 预览 pocket 路线的六张样板:她给他的(已被收)/ 他那边的已收款 / 他回一句 / 他花了 / 他转给她(待收)/ 她转给他(待收,没写备注)
@@ -655,6 +655,7 @@ final class LXChatData {
             else if LustreConfig.previewFocus == "moments" { LXMomentsPreview.start() }
             else if LustreConfig.previewFocus == "radio" { LXRadioPreview.start() }
             else if LustreConfig.previewFocus == "sys" { LXSysPreview.start() }
+            else if LustreConfig.previewFocus == "sleep" { LXSleepPreview.start() }
             else if LustreConfig.previewFocus == "probe" { ChatListPlugin.live?.previewCrashProbe() }
             else { ChatListPlugin.live?.previewAvaTimeCheck() }
         }

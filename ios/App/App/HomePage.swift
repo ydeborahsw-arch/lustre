@@ -407,23 +407,161 @@ func homeCardHead(_ title: String, theme: HomeTheme) -> (row: UIStackView, when:
 }
 
 
+/// 1021 她的单(#86657):睡眠区照苹果健康的分期图画——Awake/REM/Core/Deep 四行,每段画在自己那行,
+/// 段与段之间竖线连着;颜色从她发的截图上取(清醒 #EE7258 / REM #6DD0F9 / Core #3F8EF7 / Deep #36359D)。
+/// 每块 = 亮芯 + 一圈约 1.6pt 的暗晕(截图量的:晕≈本色 45% 叠在底上);连线 2pt,用暗晕色,上下两段颜色渐变。
+/// 时间轴和刻度一律按北京时间(她 #86663/#86664),跟服务器按北京日期分天对得上。
+final class HVSleepChart: UIView {
+    static let cAwake = UIColor(red: 0.933, green: 0.447, blue: 0.345, alpha: 1)
+    static let cRem   = UIColor(red: 0.427, green: 0.816, blue: 0.976, alpha: 1)
+    static let cCore  = UIColor(red: 0.247, green: 0.557, blue: 0.969, alpha: 1)
+    static let cDeep  = UIColor(red: 0.212, green: 0.208, blue: 0.616, alpha: 1)
+    static let rowH: CGFloat = 40
+    static let axisH: CGFloat = 20
+    static var height: CGFloat { rowH * 4 + axisH }
+
+    private let theme: HomeTheme
+    private var segs: [(row: Int, s: Double, e: Double)] = []
+    private var t0: Double = 0
+    private var t1: Double = 1
+    private var ticks: [Double] = []
+
+    private static let rows = ["Awake", "REM", "Core", "Deep"]
+    private static let cols = [cAwake, cRem, cCore, cDeep]
+    private static let tickFmt: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.timeZone = TimeZone(identifier: "Asia/Shanghai")
+        f.dateFormat = "h a"
+        return f
+    }()
+
+    init(theme: HomeTheme, segments raw: [[String: Any]]) {
+        self.theme = theme
+        super.init(frame: .zero)
+        backgroundColor = .clear
+        isOpaque = false
+        contentMode = .redraw
+        for d in raw {
+            let t = (d["t"] as? String) ?? "core"
+            let s = (d["s"] as? NSNumber)?.doubleValue ?? 0
+            let e = (d["e"] as? NSNumber)?.doubleValue ?? 0
+            guard e > s else { continue }
+            let row = ["awake": 0, "rem": 1, "core": 2, "deep": 3][t] ?? 2
+            segs.append((row, s, e))
+        }
+        segs.sort { $0.s < $1.s }
+        guard let first = segs.first else { return }
+        let lo = first.s
+        let hi = segs.map { $0.e }.max() ?? lo + 3600
+        let spanH = (hi - lo) / 3600
+        let step = (spanH > 9 ? 3.0 : spanH > 4 ? 2.0 : 1.0) * 3600
+        // 北京 = UTC+8 不换夏令时,直接平移 8 小时取整点
+        let bj = 8.0 * 3600
+        t0 = ((lo + bj) / step).rounded(.down) * step - bj
+        t1 = ((hi + bj) / step).rounded(.up) * step - bj
+        if t1 <= t0 { t1 = t0 + step }
+        var t = t0
+        while t <= t1 + 1 { ticks.append(t); t += step }
+    }
+    required init?(coder: NSCoder) { fatalError() }
+
+    var isEmpty: Bool { segs.isEmpty }
+
+    override func draw(_ rect: CGRect) {
+        guard let ctx = UIGraphicsGetCurrentContext(), !segs.isEmpty else { return }
+        let W = bounds.width
+        let rowH = Self.rowH
+        let chartH = rowH * 4
+        let grid = theme.text.withAlphaComponent(0.16)
+        func x(_ t: Double) -> CGFloat { CGFloat((t - t0) / (t1 - t0)) * W }
+
+        // 横线(行与行之间 + 底线)、两侧竖边、内部刻度虚线
+        ctx.setLineWidth(0.5)
+        ctx.setStrokeColor(grid.cgColor)
+        for i in 1...4 {
+            let y = rowH * CGFloat(i)
+            ctx.move(to: CGPoint(x: 0, y: y)); ctx.addLine(to: CGPoint(x: W, y: y))
+        }
+        ctx.move(to: CGPoint(x: 0.25, y: 0)); ctx.addLine(to: CGPoint(x: 0.25, y: chartH + Self.axisH))
+        ctx.move(to: CGPoint(x: W - 0.25, y: 0)); ctx.addLine(to: CGPoint(x: W - 0.25, y: chartH + Self.axisH))
+        ctx.strokePath()
+        ctx.saveGState()
+        ctx.setLineDash(phase: 0, lengths: [2, 2])
+        for t in ticks.dropFirst().dropLast() {
+            let xx = x(t).rounded() + 0.25
+            ctx.move(to: CGPoint(x: xx, y: 0)); ctx.addLine(to: CGPoint(x: xx, y: chartH + Self.axisH))
+        }
+        ctx.strokePath()
+        ctx.restoreGState()
+
+        // 行名(每行左上)和时间刻度(刻度线右边)
+        let rowAttr: [NSAttributedString.Key: Any] = [.font: LXDrawerTint.font(11), .foregroundColor: theme.textSoft]
+        for (i, name) in Self.rows.enumerated() {
+            (name as NSString).draw(at: CGPoint(x: 6, y: rowH * CGFloat(i) + 3), withAttributes: rowAttr)
+        }
+        let axAttr: [NSAttributedString.Key: Any] = [.font: LXDrawerTint.font(10.5), .foregroundColor: theme.textFaint]
+        for t in ticks.dropLast() {
+            let s = Self.tickFmt.string(from: Date(timeIntervalSince1970: t)) as NSString
+            s.draw(at: CGPoint(x: x(t) + 4, y: chartH + 3), withAttributes: axAttr)
+        }
+
+        let blockH = rowH * 0.5
+        func midY(_ row: Int) -> CGFloat { rowH * CGFloat(row) + rowH / 2 + 4 }
+        func blockRect(_ g: (row: Int, s: Double, e: Double)) -> CGRect {
+            var a = x(g.s), b = x(g.e)
+            if b - a < 2.2 { let m = (a + b) / 2; a = m - 1.1; b = m + 1.1 }
+            return CGRect(x: a, y: midY(g.row) - blockH / 2, width: b - a, height: blockH)
+        }
+
+        // 连线:上一段结束处一根竖线连到下一段(中间断开超过 30 分钟的不连)
+        for i in 1..<max(1, segs.count) {
+            let p = segs[i - 1], n = segs[i]
+            guard p.row != n.row, n.s - p.e < 1800 else { continue }
+            let xx = min(max(x(n.s), 1), W - 1)
+            let ya = midY(p.row), yb = midY(n.row)
+            let top = min(ya, yb), bot = max(ya, yb)
+            let cTop = Self.cols[ya < yb ? p.row : n.row].withAlphaComponent(0.45)
+            let cBot = Self.cols[ya < yb ? n.row : p.row].withAlphaComponent(0.45)
+            ctx.saveGState()
+            let lineRect = CGRect(x: xx - 1, y: top, width: 2, height: bot - top)
+            ctx.clip(to: lineRect)
+            if let gr = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(),
+                                   colors: [cTop.cgColor, cBot.cgColor] as CFArray, locations: [0, 1]) {
+                ctx.drawLinearGradient(gr, start: CGPoint(x: xx, y: top), end: CGPoint(x: xx, y: bot), options: [])
+            }
+            ctx.restoreGState()
+        }
+
+        // 块:先暗晕再亮芯
+        for g in segs {
+            let r = blockRect(g)
+            let c = Self.cols[g.row]
+            let halo = r.insetBy(dx: -1.6, dy: -1.6)
+            let hr = min(6.5, halo.width / 2, halo.height / 2)
+            c.withAlphaComponent(0.45).setFill()
+            UIBezierPath(roundedRect: halo, cornerRadius: hr).fill()
+            let cr = min(5, r.width / 2, r.height / 2)
+            c.setFill()
+            UIBezierPath(roundedRect: r, cornerRadius: cr).fill()
+        }
+    }
+}
+
+
 final class HVCard: HomeCard {
     private let theme: HomeTheme
     private let roller: HomeRoller
     private let whenLab: UILabel
     private let dayLab = UILabel()
     private let bigLab = UILabel()
-    private let stages = UIView()
-    private let stageBar = UIStackView()
-    private let legend = UIStackView()
-    private let barsRow = UIStackView()
-    private let emptyLab = UILabel()
+    /// 分期图的框:左右滑换天时新旧两张图在里面平移,框外裁掉
+    private let chartBox = UIView()
+    private var chart: HVSleepChart?
     private let stats = UIStackView()
     private var days: [[String: Any]] = []
     private var selIdx = 0
-    private var stageSig = ""
-    private var stageDate = ""
-    private var stageRevealed = false
+    private var chartDate = ""
 
     init(theme: HomeTheme, roller: HomeRoller) {
         self.theme = theme
@@ -442,40 +580,20 @@ final class HVCard: HomeCard {
         bigLab.font = LXDrawerTint.font(23, wght: 600)
         bigLab.setContentCompressionResistancePriority(.required, for: .horizontal)
         bigLab.textColor = theme.text
-        sleepRow.addArrangedSubview(dayLab)
         sleepRow.addArrangedSubview(bigLab)
+        sleepRow.addArrangedSubview(dayLab)
         sleepRow.addArrangedSubview(UIView())
 
-        stageBar.axis = .horizontal
-        stageBar.spacing = 2
-        stageBar.distribution = .fill
-        stageBar.layer.cornerRadius = 5
-        stageBar.clipsToBounds = true
-        legend.axis = .horizontal
-        legend.distribution = .equalSpacing
-        let stStack = UIStackView(arrangedSubviews: [stageBar, legend])
-        stStack.axis = .vertical
-        stStack.spacing = 6
-        stages.translatesAutoresizingMaskIntoConstraints = false
-        stStack.translatesAutoresizingMaskIntoConstraints = false
-        stages.addSubview(stStack)
-        NSLayoutConstraint.activate([
-            stageBar.heightAnchor.constraint(equalToConstant: 9),
-            stStack.topAnchor.constraint(equalTo: stages.topAnchor),
-            stStack.leadingAnchor.constraint(equalTo: stages.leadingAnchor),
-            stStack.trailingAnchor.constraint(equalTo: stages.trailingAnchor),
-            stStack.bottomAnchor.constraint(equalTo: stages.bottomAnchor),
-        ])
-
-        barsRow.axis = .horizontal
-        barsRow.spacing = 8
-        barsRow.alignment = .bottom
-        barsRow.distribution = .fillEqually
-        emptyLab.font = LXDrawerTint.font(12.5)
-        emptyLab.textColor = theme.textFaint
-        emptyLab.numberOfLines = 0
-        emptyLab.text = "趋势图还在攒数据,手机每天上报一次就多一根柱。"
-        emptyLab.isHidden = true
+        chartBox.clipsToBounds = true
+        chartBox.heightAnchor.constraint(equalToConstant: HVSleepChart.height).isActive = true
+        chartBox.isHidden = true
+        // 往右滑 = 看前一天,往左滑 = 回后一天(跟苹果健康一样)
+        let toOlder = UISwipeGestureRecognizer(target: self, action: #selector(swiped(_:)))
+        toOlder.direction = .right
+        let toNewer = UISwipeGestureRecognizer(target: self, action: #selector(swiped(_:)))
+        toNewer.direction = .left
+        chartBox.addGestureRecognizer(toOlder)
+        chartBox.addGestureRecognizer(toNewer)
 
         let rule = UIView()
         rule.backgroundColor = theme.hairline
@@ -485,13 +603,11 @@ final class HVCard: HomeCard {
         stats.distribution = .equalCentering
         stats.spacing = 6
 
-        let col = UIStackView(arrangedSubviews: [head.row, sleepRow, stages, barsRow, emptyLab, rule, stats])
+        let col = UIStackView(arrangedSubviews: [head.row, sleepRow, chartBox, rule, stats])
         col.axis = .vertical
         col.setCustomSpacing(10, after: head.row)
-        col.setCustomSpacing(9, after: sleepRow)
-        col.setCustomSpacing(14, after: stages)
-        col.setCustomSpacing(14, after: barsRow)
-        col.setCustomSpacing(12, after: emptyLab)
+        col.setCustomSpacing(12, after: sleepRow)
+        col.setCustomSpacing(14, after: chartBox)
         col.setCustomSpacing(11, after: rule)
         col.translatesAutoresizingMaskIntoConstraints = false
         content.addSubview(col)
@@ -504,15 +620,10 @@ final class HVCard: HomeCard {
     }
     required init?(coder: NSCoder) { fatalError() }
 
-    private static let WD = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
-
     private func fmtHM(_ hours: Double) -> String {
         let h = Int(hours)
         let m = Int(((hours - Double(h)) * 60).rounded())
         return m > 0 ? "\(h)h\(String(format: "%02d", m))m" : "\(h)h"
-    }
-    private func hm(_ m: Int) -> String {
-        m >= 60 ? "\(m / 60)h\(String(format: "%02d", m % 60))m" : "\(m)m"
     }
 
     private var renderSig = ""
@@ -528,10 +639,15 @@ final class HVCard: HomeCard {
             renderSig = sig
         }
         if !whenTxt.isEmpty { whenLab.text = whenTxt }
+        let keepDate = selIdx < days.count && selIdx != days.count - 1 ? (days[selIdx]["date"] as? String) : nil
         days = rawDays.filter { (($0["sleepHours"] as? NSNumber)?.doubleValue ?? 0) > 0 }
-        selIdx = max(0, days.count - 1)
-        showDay(days.isEmpty ? nil : days[selIdx], user: false)
-        renderBars()
+        // 正翻着前几天时数据刷新,别把她弹回最新一天
+        if let keepDate, let i = days.firstIndex(where: { ($0["date"] as? String) == keepDate }) {
+            selIdx = i
+        } else {
+            selIdx = max(0, days.count - 1)
+        }
+        showDay(days.isEmpty ? nil : days[selIdx], user: false, dir: 0)
         renderStats(latest)
         if !days.isEmpty || !latest.isEmpty { hasData = true }
         if enterPending, enterLive, hasData { playEntrance(delay: 0) }
@@ -554,47 +670,49 @@ final class HVCard: HomeCard {
             let n = s.firstIndex(of: " ").map { s.distance(from: s.startIndex, to: $0) } ?? s.count
             HomeReveal.rise(v, stagger: 0.11, delay: delay, steps: n)
         }
-        if !barsRow.isHidden {
-            for box in barsRow.arrangedSubviews {
-                guard let fill = box.subviews.first?.subviews.first else { continue }
-                let h = fill.bounds.height
-                guard h > 0 else { continue }
-                let k: CGFloat = 0.001
-                fill.transform = CGAffineTransform(translationX: 0, y: h * (1 - k) / 2).scaledBy(x: 1, y: k)
-                let a = UIViewPropertyAnimator(duration: 0.6, controlPoint1: homeEnterA, controlPoint2: homeEnterB) {
-                    fill.transform = .identity
-                }
-                a.startAnimation(afterDelay: delay)
-            }
-        }
-        if !stages.isHidden, stageBar.bounds.width > 0 {
-            let mask = UIView(frame: CGRect(x: 0, y: 0, width: 0, height: 20))
+        if !chartBox.isHidden, let chart, chartBox.bounds.width > 0 {
+            // 分期图从左往右画出来
+            let mask = UIView(frame: CGRect(x: 0, y: 0, width: 0, height: HVSleepChart.height))
             mask.backgroundColor = .black
-            stageBar.mask = mask
-            let a = UIViewPropertyAnimator(duration: 0.65, controlPoint1: homeEnterA, controlPoint2: homeEnterB) {
-                mask.frame = CGRect(x: 0, y: 0, width: max(320, self.stageBar.bounds.width), height: 20)
+            chart.mask = mask
+            let a = UIViewPropertyAnimator(duration: 0.9, controlPoint1: homeEnterA, controlPoint2: homeEnterB) {
+                mask.frame = CGRect(x: 0, y: 0, width: self.chartBox.bounds.width, height: HVSleepChart.height)
             }
-            a.addCompletion { [weak self] _ in
-                guard let s = self, s.stageBar.mask === mask else { return }
-                s.stageBar.mask = nil
+            a.addCompletion { [weak chart] _ in
+                guard let chart, chart.mask === mask else { return }
+                chart.mask = nil
             }
             a.startAnimation(afterDelay: delay)
         }
     }
 
-    private func showDay(_ rec: [String: Any]?, user: Bool) {
+    private static let dayFmt: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.timeZone = TimeZone(identifier: "UTC")
+        f.dateFormat = "yyyy-MM-dd"
+        return f
+    }()
+    private static let showFmt: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.timeZone = TimeZone(identifier: "UTC")
+        f.dateFormat = "EEE, MMM d"
+        return f
+    }()
+
+    /// dir: 0 = 原地换(刷新),-1 = 换到前一天(新图从左边进),+1 = 换到后一天(新图从右边进)
+    private func showDay(_ rec: [String: Any]?, user: Bool, dir: Int) {
         guard let rec else {
             HomeReveal.finish(bigLab)
-            bigLab.text = "没读到"; dayLab.text = "—"; stages.isHidden = true; return
+            bigLab.text = "没读到"; dayLab.text = "—"
+            chart?.removeFromSuperview(); chart = nil; chartDate = ""
+            chartBox.isHidden = true
+            return
         }
         let date = (rec["date"] as? String) ?? ""
-        var cal = Calendar(identifier: .gregorian)
-        cal.timeZone = TimeZone(identifier: "UTC")!
-        let df = DateFormatter()
-        df.dateFormat = "yyyy-MM-dd"
-        df.timeZone = TimeZone(identifier: "UTC")
-        if let d = df.date(from: date) {
-            dayLab.text = Self.WD[cal.component(.weekday, from: d) - 1]
+        if let d = Self.dayFmt.date(from: date) {
+            dayLab.text = Self.showFmt.string(from: d)
         } else { dayLab.text = "—" }
         let sleepMin = ((rec["sleepHours"] as? NSNumber)?.doubleValue ?? 0) * 60
         let paint: (Double) -> Void = { [weak self] v in
@@ -605,166 +723,67 @@ final class HVCard: HomeCard {
             s.bigLab.text = t
             UIView.performWithoutAnimation { s.bigLab.superview?.layoutIfNeeded() }
         }
-        if user { roller.roll(key: "sleepBig", to: sleepMin.rounded(), dur: 1.4, apply: paint) }
+        if user { roller.roll(key: "sleepBig", to: sleepMin.rounded(), dur: 0.6, apply: paint) }
         else { roller.set(key: "sleepBig", to: sleepMin.rounded(), apply: paint) }
-        renderStages(rec, animate: user)
+        renderChart(rec, dir: dir)
     }
 
-    private func renderStages(_ rec: [String: Any], animate: Bool) {
-        let deep = Int(((rec["sleepDeepMin"] as? NSNumber)?.doubleValue ?? 0).rounded())
-        let rem = Int(((rec["sleepRemMin"] as? NSNumber)?.doubleValue ?? 0).rounded())
-        let core = Int(((rec["sleepCoreMin"] as? NSNumber)?.doubleValue ?? 0).rounded())
-        let awake = Int(((rec["sleepAwakeMin"] as? NSNumber)?.doubleValue ?? 0).rounded())
-        let segs = rec["sleepSegments"] as? [[String: Any]] ?? []
-        let awakeN = segs.filter { ($0["t"] as? String) == "awake" }.count
-        let tot = deep + rem + core
-        if tot == 0 { stages.isHidden = true; stageSig = ""; return }
-        stages.isHidden = false
-        let sig = "\(rec["date"] ?? ""):\(deep):\(rem):\(core):\(awake):\(awakeN)"
-        if sig == stageSig, !stageBar.arrangedSubviews.isEmpty { return }
-        let dateKey = "\(rec["date"] ?? "")"
-        let changedOnly = dateKey == stageDate && stageRevealed
-        stageSig = sig
-        stageDate = dateKey
-        stageBar.arrangedSubviews.forEach { $0.removeFromSuperview() }
-        let pcts = [max(0.02, Double(deep) / Double(tot)), max(0.02, Double(rem) / Double(tot)),
-                    max(0.02, Double(core) / Double(tot))]
-        let cols = [HomeTheme.stDeep, HomeTheme.stRem, HomeTheme.stCore]
-        var lastMult: NSLayoutConstraint?
-        for (i, p) in pcts.enumerated() {
-            let seg = UIView()
-            seg.backgroundColor = cols[i]
-            stageBar.addArrangedSubview(seg)
-            if i > 0, let first = stageBar.arrangedSubviews.first {
-                let c = seg.widthAnchor.constraint(equalTo: first.widthAnchor, multiplier: p / pcts[0])
-                c.isActive = true
-                lastMult = c
-            }
+    private var chartSegSig = ""
+    private func renderChart(_ rec: [String: Any], dir: Int) {
+        let date = (rec["date"] as? String) ?? ""
+        let raw = rec["sleepSegments"] as? [[String: Any]] ?? []
+        let sig = date + "|" + raw.map { "\($0["t"] ?? "")\($0["s"] ?? "")\($0["e"] ?? "")" }.joined(separator: ",")
+        if sig == chartSegSig, chart != nil { return }
+        chartSegSig = sig
+        let next = HVSleepChart(theme: theme, segments: raw)
+        if next.isEmpty {
+            chart?.removeFromSuperview(); chart = nil; chartDate = date
+            chartBox.isHidden = true
+            return
         }
-        _ = lastMult
-        if animate, !changedOnly, !UIAccessibility.isReduceMotionEnabled {
-            stageRevealed = true
-            let mask = UIView(frame: .zero)
-            mask.backgroundColor = .black
-            stageBar.mask = mask
-            stageBar.layoutIfNeeded()
-            mask.frame = CGRect(x: 0, y: 0, width: 0, height: 20)
-            let anim = UIViewPropertyAnimator(duration: 1.0, controlPoint1: CGPoint(x: 0.33, y: 1), controlPoint2: CGPoint(x: 0.68, y: 1)) {
-                mask.frame = CGRect(x: 0, y: 0, width: max(320, self.stageBar.bounds.width), height: 20)
-            }
-            anim.addCompletion { _ in self.stageBar.mask = nil }
-            anim.startAnimation()
-        } else {
-            stageRevealed = true
-            stageBar.mask = nil
+        chartBox.isHidden = false
+        chartBox.layoutIfNeeded()
+        let W = chartBox.bounds.width
+        let H = HVSleepChart.height
+        next.frame = CGRect(x: 0, y: 0, width: W, height: H)
+        next.autoresizingMask = [.flexibleWidth]
+        let old = chart
+        chart = next
+        chartDate = date
+        guard let old, dir != 0, W > 0, !UIAccessibility.isReduceMotionEnabled else {
+            old?.removeFromSuperview()
+            chartBox.addSubview(next)
+            return
         }
-        legend.arrangedSubviews.forEach { $0.removeFromSuperview() }
-        func dot(_ c: UIColor, hollow: Bool = false) -> NSAttributedString {
-            let r = NSTextAttachment()
-            let img = UIGraphicsImageRenderer(size: CGSize(width: 7, height: 7)).image { ctx in
-                let path = UIBezierPath(ovalIn: CGRect(x: hollow ? 0.7 : 0, y: hollow ? 0.7 : 0,
-                                                       width: hollow ? 5.6 : 7, height: hollow ? 5.6 : 7))
-                if hollow {
-                    ctx.cgContext.setStrokeColor(theme.textFaint.cgColor)
-                    path.lineWidth = 1.4
-                    path.stroke()
-                } else {
-                    ctx.cgContext.setFillColor(c.cgColor)
-                    path.fill()
-                }
-            }
-            r.image = img
-            r.bounds = CGRect(x: 0, y: -0.5, width: 7, height: 7)
-            return NSAttributedString(attachment: r)
+        // 换天:旧图整张滑出、新图整张滑进,不淡入淡出、不闪
+        let off = CGFloat(dir) * W
+        next.frame.origin.x = off
+        chartBox.addSubview(next)
+        let a = UIViewPropertyAnimator(duration: 0.32, curve: .easeOut) {
+            old.frame.origin.x = -off
+            next.frame.origin.x = 0
         }
-        func chunk(_ name: String, _ v: String) -> NSAttributedString {
-            let s = NSMutableAttributedString(string: " \(name) ",
-                attributes: [.font: LXDrawerTint.font(10), .foregroundColor: theme.textFaint])
-            s.append(NSAttributedString(string: v,
-                attributes: [.font: LXDrawerTint.font(10, wght: 600), .foregroundColor: theme.textSoft]))
-            return s
-        }
-        func seg(_ d: NSAttributedString, _ name: String, _ v: String) -> UILabel {
-            let l = UILabel()
-            let s = NSMutableAttributedString()
-            s.append(d)
-            s.append(chunk(name, v))
-            l.attributedText = s
-            l.adjustsFontSizeToFitWidth = true
-            return l
-        }
-        legend.addArrangedSubview(seg(dot(HomeTheme.stDeep), "Deep", hm(deep)))
-        legend.addArrangedSubview(seg(dot(HomeTheme.stRem), "REM", hm(rem)))
-        legend.addArrangedSubview(seg(dot(HomeTheme.stCore), "Core", hm(core)))
-        if awake > 0 {
-            legend.addArrangedSubview(seg(dot(.clear, hollow: true), "Awake", hm(awake) + (awakeN > 0 ? "·\(awakeN)x" : "")))
-        }
+        a.addCompletion { _ in old.removeFromSuperview() }
+        a.startAnimation()
     }
 
-    private func renderBars() {
-        barsRow.arrangedSubviews.forEach { $0.removeFromSuperview() }
-        emptyLab.isHidden = !days.isEmpty
-        barsRow.isHidden = days.isEmpty
-        guard !days.isEmpty else { return }
-        let maxH = max(days.map { (($0["sleepHours"] as? NSNumber)?.doubleValue ?? 0) }.max() ?? 8, 8)
-        for (i, d) in days.enumerated() {
-            let h = (d["sleepHours"] as? NSNumber)?.doubleValue ?? 0
-            let pct = max(0.06, (h / maxH))
-            let day = Int(String((d["date"] as? String ?? "").suffix(2))) ?? 0
-            barsRow.addArrangedSubview(makeBar(i: i, pct: pct, label: "\(day)"))
-        }
+    private var lastSwipe: CFTimeInterval = 0
+    @objc private func swiped(_ g: UISwipeGestureRecognizer) {
+        let now = CACurrentMediaTime()
+        guard now - lastSwipe > 0.34 else { return }
+        let to = g.direction == .right ? selIdx - 1 : selIdx + 1
+        guard to >= 0, to < days.count else { return }
+        lastSwipe = now
+        selIdx = to
+        showDay(days[selIdx], user: true, dir: g.direction == .right ? -1 : 1)
     }
 
-    private func makeBar(i: Int, pct: Double, label: String) -> UIControl {
-        let box = UIControl()
-        let colV = UIView()
-        colV.backgroundColor = theme.segTrack
-        colV.layer.cornerRadius = 7
-        colV.clipsToBounds = true
-        colV.isUserInteractionEnabled = false
-        let fill = UIView()
-        fill.backgroundColor = i == selIdx ? theme.accent : theme.sliderThumb
-        fill.layer.cornerRadius = 7
-        let lab = UILabel()
-        lab.text = label
-        lab.font = LXDrawerTint.font(10.5, wght: i == selIdx ? 700 : 400)
-        lab.textColor = i == selIdx ? theme.accentText : theme.textFaint
-        lab.textAlignment = .center
-        lab.isUserInteractionEnabled = false
-        [colV, fill, lab].forEach { $0.translatesAutoresizingMaskIntoConstraints = false }
-        colV.addSubview(fill)
-        box.addSubview(colV)
-        box.addSubview(lab)
-        NSLayoutConstraint.activate([
-            colV.topAnchor.constraint(equalTo: box.topAnchor),
-            colV.leadingAnchor.constraint(equalTo: box.leadingAnchor),
-            colV.trailingAnchor.constraint(equalTo: box.trailingAnchor),
-            colV.heightAnchor.constraint(equalToConstant: 64),
-            fill.leadingAnchor.constraint(equalTo: colV.leadingAnchor),
-            fill.trailingAnchor.constraint(equalTo: colV.trailingAnchor),
-            fill.bottomAnchor.constraint(equalTo: colV.bottomAnchor),
-            fill.heightAnchor.constraint(equalTo: colV.heightAnchor, multiplier: pct),
-            lab.topAnchor.constraint(equalTo: colV.bottomAnchor, constant: 6),
-            lab.centerXAnchor.constraint(equalTo: box.centerXAnchor),
-            lab.bottomAnchor.constraint(equalTo: box.bottomAnchor),
-        ])
-        box.tag = i
-        box.addTarget(self, action: #selector(barTap(_:)), for: .touchUpInside)
-        return box
-    }
-
-    @objc private func barTap(_ b: UIControl) {
-        guard b.tag != selIdx, b.tag < days.count else { return }
-        selIdx = b.tag
-        renderBars()
-        showDay(days[selIdx], user: true)
-    }
-
-    func previewSelectBar(_ i: Int) {
-        guard i < days.count, i != selIdx else { return }
-        selIdx = i
-        renderBars()
-        showDay(days[selIdx], user: true)
+    /// 预览路线用:模拟往右滑一下(看前一天);older=false 是往左滑回后一天
+    func previewSwipeOlder(_ older: Bool = true) {
+        let to = older ? selIdx - 1 : selIdx + 1
+        guard to >= 0, to < days.count else { return }
+        selIdx = to
+        showDay(days[selIdx], user: true, dir: older ? -1 : 1)
     }
 
     private func renderStats(_ latest: [String: Any]) {
@@ -2519,7 +2538,7 @@ public class HomePlugin: CAPPlugin, CAPBridgedPlugin, UIGestureRecognizerDelegat
                 DispatchQueue.main.asyncAfter(deadline: .now() + 2) { v.calCard.previewReveal() }
                 DispatchQueue.main.asyncAfter(deadline: .now() + 6) {
                     v.calCard.previewFlipPrev()
-                    v.vitals.previewSelectBar(0)
+                    v.vitals.previewSwipeOlder()
                     v.todoCard.previewInject()
                 }
                 DispatchQueue.main.asyncAfter(deadline: .now() + 16) {
@@ -3135,5 +3154,75 @@ final class LXVerticalScroll: UIScrollView {
     override var contentSize: CGSize {
         get { super.contentSize }
         set { super.contentSize = CGSize(width: min(newValue.width, bounds.width), height: newValue.height) }
+    }
+}
+
+
+// MARK: - 预览路线 sleep:样板睡眠数据(不连服务器、不是她的数据),整窗盖一页只放一张 Vitals 卡
+
+enum LXSleepPreview {
+    static func start(tries: Int = 0) {
+        guard LustreConfig.isPreview, LustreConfig.previewFocus == "sleep" else { return }
+        guard let top = DrawerPlugin.topVC(), let win = top.view.window else {
+            if tries < 40 { DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { start(tries: tries + 1) } }
+            return
+        }
+        // 北京时间某天 h 点的 Unix 秒(1_792_252_800 = 北京 2026-10-18 零点)
+        func bj(_ day: Int, _ h: Double) -> Int { 1_792_252_800 + day * 86400 + Int(h * 3600) }
+        func seg(_ t: String, _ day: Int, _ a: Double, _ b: Double) -> [String: Any] { ["t": t, "s": bj(day, a), "e": bj(day, b)] }
+        let d1: [[String: Any]] = [   // 半夜一点到早上八点
+            seg("core", 1, 1.0, 1.6), seg("deep", 1, 1.6, 2.4), seg("core", 1, 2.4, 3.1), seg("rem", 1, 3.1, 3.5),
+            seg("awake", 1, 3.5, 3.55), seg("core", 1, 3.55, 4.6), seg("deep", 1, 4.6, 5.0), seg("core", 1, 5.0, 5.9),
+            seg("rem", 1, 5.9, 6.6), seg("core", 1, 6.6, 7.6), seg("awake", 1, 7.6, 7.65), seg("rem", 1, 7.65, 8.0)]
+        let d2: [[String: Any]] = [   // 三点到十点
+            seg("core", 2, 3.0, 3.8), seg("deep", 2, 3.8, 4.5), seg("core", 2, 4.5, 5.6), seg("rem", 2, 5.6, 6.2),
+            seg("core", 2, 6.2, 7.4), seg("awake", 2, 7.4, 7.5), seg("rem", 2, 7.5, 8.3), seg("core", 2, 8.3, 9.9)]
+        let d3: [[String: Any]] = [   // 照她那张图的样子:早上七点到下午三点多,醒好几次
+            seg("core", 3, 7.0, 7.4), seg("deep", 3, 7.4, 7.9), seg("awake", 3, 7.9, 7.95), seg("rem", 3, 7.95, 8.15),
+            seg("awake", 3, 8.15, 8.2), seg("core", 3, 8.2, 8.9), seg("deep", 3, 8.9, 9.0), seg("core", 3, 9.0, 9.3),
+            seg("awake", 3, 9.3, 9.35), seg("rem", 3, 9.35, 10.1), seg("core", 3, 10.1, 11.2), seg("rem", 3, 11.2, 12.2),
+            seg("awake", 3, 12.2, 12.25), seg("core", 3, 12.25, 13.3), seg("awake", 3, 13.3, 13.35), seg("rem", 3, 13.35, 14.1),
+            seg("core", 3, 14.1, 14.7), seg("deep", 3, 14.7, 14.85), seg("awake", 3, 14.85, 14.9), seg("core", 3, 14.9, 15.3),
+            seg("awake", 3, 15.3, 15.35), seg("core", 3, 15.35, 15.5)]
+        func day(_ date: String, _ segs: [[String: Any]]) -> [String: Any] {
+            let asleep = segs.filter { ($0["t"] as? String) != "awake" }
+                .reduce(0) { $0 + (($1["e"] as? Int ?? 0) - ($1["s"] as? Int ?? 0)) }
+            return ["date": date, "sleepHours": (Double(asleep) / 360).rounded() / 10, "sleepSegments": segs]
+        }
+        let days = [day("2026-10-19", d1), day("2026-10-20", d2), day("2026-10-21", d3)]
+        let latest: [String: Any] = ["stepsToday": 4321, "activeKcalToday": 210, "restingHeartRate": 62, "hrvSDNN": 41]
+
+        let theme = HomeTheme()
+        let page = UIView(frame: win.bounds)
+        page.backgroundColor = theme.bg
+        let card = HVCard(theme: theme, roller: HomeRoller())
+        card.translatesAutoresizingMaskIntoConstraints = false
+        page.addSubview(card)
+        NSLayoutConstraint.activate([
+            card.topAnchor.constraint(equalTo: page.topAnchor, constant: 110),
+            card.leadingAnchor.constraint(equalTo: page.leadingAnchor, constant: theme.sidePad),
+            card.trailingAnchor.constraint(equalTo: page.trailingAnchor, constant: -theme.sidePad),
+        ])
+        let mark = UIView(frame: LXBubbleSampler.beacon)
+        mark.backgroundColor = UIColor(red: 1, green: 0, blue: 1, alpha: 1)
+        let phase = UIView(frame: CGRect(x: 28, y: 70, width: 20, height: 20))
+        page.addSubview(mark)
+        page.addSubview(phase)
+        win.addSubview(page)
+        page.layoutIfNeeded()
+        card.render(latest: latest, days: days, whenTxt: "sample")
+        // 第一步一开页就亮着,往后 30 秒起每 12 秒一步:前一天 / 再前一天 / 回后一天
+        let steps: [(UIColor, () -> Void)] = [
+            (.yellow, { }),
+            (.cyan, { card.previewSwipeOlder() }),
+            (.red, { card.previewSwipeOlder() }),
+            (.orange, { card.previewSwipeOlder(false) }),
+        ]
+        for (i, st) in steps.enumerated() {
+            DispatchQueue.main.asyncAfter(deadline: .now() + (i == 0 ? 0 : 30 + Double(i - 1) * 12)) {
+                phase.backgroundColor = st.0
+                st.1()
+            }
+        }
     }
 }
