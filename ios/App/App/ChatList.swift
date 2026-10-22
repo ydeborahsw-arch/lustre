@@ -1856,6 +1856,9 @@ final class LXBubbleSampler: UIView {
                   quoteName: "TA", quoteText: "样板:被引用的那句原话,比气泡长", quoteId: 2),
             LXMsg(id: 9_000_003, from: "human", kind: "user", text: "样板:引用的是一张图", ts: now, session: "", attCount: 0,
                   quoteName: "TA", quoteText: "", quoteId: 3),
+            // 1022:纯英文一行(量 "ee" 上下留白对不对称)
+            LXMsg(id: 9_000_004, from: "ai", kind: "reply", text: "see you there", ts: now, session: "", attCount: 0),
+            LXMsg(id: 9_000_005, from: "human", kind: "user", text: "never mind", ts: now, session: "", attCount: 0),
         ]
     }
 
@@ -2736,6 +2739,7 @@ final class LXBubbleCell: UITableViewCell {
         ns.addAttribute(.foregroundColor, value: color, range: full)
         ns.addAttribute(.kern, value: tg ? 0 : -0.12, range: full)
         let nss = ns.string as NSString
+        var anyCJK = false
         var i = 0
         while i < nss.length {
             let composed = nss.rangeOfComposedCharacterSequence(at: i)
@@ -2746,6 +2750,7 @@ final class LXBubbleCell: UITableViewCell {
                 (0x20000...0x2FA1F).contains(sc.value)
             }
             if cjk {
+                anyCJK = true
                 var end = composed.location + composed.length
                 while end < nss.length {
                     let nxt = nss.rangeOfComposedCharacterSequence(at: end)
@@ -2775,6 +2780,12 @@ final class LXBubbleCell: UITableViewCell {
         ps.lineSpacing = 0
         ps.paragraphSpacing = 11 * base.pointSize / 15      // 15 号字段距 11;头像模式字小了同比收
         ns.addAttribute(.paragraphStyle, value: ps, range: full)
+        // 1022 她 #87231:纯英文消息字墨偏下,"ee"上面留白比下面多。量她截图(头像模式 14 号):
+        // 小写字母中心比气泡中心低约 1.8pt、整行墨(含 g/p 下伸)低约 2.2pt;中文(苹方)本来居中。
+        // 她说按 "ee" 这种没尾巴的字对齐 → 只给不含中文的消息整体上抬 0.13×字号(14 号≈1.8pt);中英混排照旧,不让同一行里中英字基线错开。
+        if !anyCJK, ns.length > 0 {
+            ns.addAttribute(.baselineOffset, value: base.pointSize * 0.13, range: full)
+        }
         return ns
     }
 
