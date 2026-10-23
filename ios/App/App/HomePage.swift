@@ -468,25 +468,6 @@ final class HVSleepChart: UIView {
 
     var isEmpty: Bool { segs.isEmpty }
 
-    /// 1023 她 #88696:入场像心电图那样一笔扫过去——亮点沿着睡眠线走的位置(每 step 点取一个,按当时所在的行)
-    func tracePoints(step: CGFloat = 3) -> [CGPoint] {
-        guard !segs.isEmpty, bounds.width > 0 else { return [] }
-        let W = bounds.width
-        var pts: [CGPoint] = []
-        var row = segs[0].row
-        var i = 0
-        var xx: CGFloat = 0
-        while xx <= W {
-            let t = t0 + Double(xx / W) * (t1 - t0)
-            while i < segs.count, segs[i].s <= t { row = segs[i].row; i += 1 }
-            let y = Self.rowH * CGFloat(row) + Self.rowH / 2 + 4
-            if let last = pts.last, last.y != y { pts.append(CGPoint(x: xx, y: last.y)) }
-            pts.append(CGPoint(x: xx, y: y))
-            xx += step
-        }
-        return pts
-    }
-
     override func draw(_ rect: CGRect) {
         guard let ctx = UIGraphicsGetCurrentContext(), !segs.isEmpty else { return }
         let W = bounds.width
@@ -721,9 +702,8 @@ final class HVCard: HomeCard {
     private var entering = false
     private var enterGen = 0
     private var heldRender: ([String: Any], [[String: Any]], String)?
-    private var sweepDot: CALayer?
 
-    /// 分期图像心电图那样扫出来:亮点沿睡眠线匀速从左走到右,线在它身后长出来(前沿柔边),走到头亮点淡掉
+    /// 分期图像心电图那样扫出来:线从左往右匀速长出来(前沿柔边)
     private func sweep(_ chart: HVSleepChart, delay: Double) {
         chart.layoutIfNeeded()
         let W = chart.bounds.width, H = HVSleepChart.height
@@ -751,46 +731,8 @@ final class HVCard: HomeCard {
         move.isRemovedOnCompletion = false
         mask.add(move, forKey: "sweep")
 
-        sweepDot?.removeFromSuperlayer()
-        sweepDot = nil
-        let pts = chart.tracePoints()
-        if pts.count > 1 {
-            let dot = CALayer()
-            dot.bounds = CGRect(x: 0, y: 0, width: 7, height: 7)
-            dot.cornerRadius = 3.5
-            dot.backgroundColor = theme.text.withAlphaComponent(0.95).cgColor
-            dot.shadowColor = theme.text.cgColor
-            dot.shadowOpacity = 0.85
-            dot.shadowRadius = 5
-            dot.shadowOffset = .zero
-            dot.position = pts[0]
-            dot.opacity = 0
-            chart.layer.superlayer?.addSublayer(dot)
-            sweepDot = dot
-            let path = CAKeyframeAnimation(keyPath: "position")
-            path.values = pts.map { NSValue(cgPoint: $0) }
-            path.keyTimes = pts.map { NSNumber(value: Double($0.x / W)) }
-            path.calculationMode = .linear
-            path.duration = Self.sweepDur
-            path.timingFunction = ease
-            let fade = CAKeyframeAnimation(keyPath: "opacity")
-            fade.values = [0, 1, 1, 0]
-            fade.keyTimes = [0, 0.06, 0.86, 1]
-            fade.duration = Self.sweepDur
-            let g = CAAnimationGroup()
-            g.animations = [path, fade]
-            g.duration = Self.sweepDur
-            g.beginTime = begin
-            g.fillMode = .both
-            g.isRemovedOnCompletion = false
-            dot.add(g, forKey: "trace")
-        }
-        let dotNow = sweepDot
-        DispatchQueue.main.asyncAfter(deadline: .now() + delay + Self.sweepDur + 0.05) { [weak self, weak chart] in
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay + Self.sweepDur + 0.05) { [weak chart] in
             if let chart, chart.layer.mask === mask { chart.layer.mask = nil }
-            guard let dotNow else { return }
-            dotNow.removeFromSuperlayer()
-            if self?.sweepDot === dotNow { self?.sweepDot = nil }
         }
     }
 
@@ -897,8 +839,6 @@ final class HVCard: HomeCard {
         let old = chart
         chart = next
         chartDate = date
-        sweepDot?.removeFromSuperlayer()
-        sweepDot = nil
         guard let old, dir != 0, W > 0, !UIAccessibility.isReduceMotionEnabled else {
             old?.removeFromSuperview()
             chartBox.addSubview(next)
