@@ -468,6 +468,25 @@ final class HVSleepChart: UIView {
 
     var isEmpty: Bool { segs.isEmpty }
 
+    /// 1023 她 #88696:入场像心电图那样一笔扫过去——亮点沿着睡眠线走的位置(每 step 点取一个,按当时所在的行)
+    func tracePoints(step: CGFloat = 3) -> [CGPoint] {
+        guard !segs.isEmpty, bounds.width > 0 else { return [] }
+        let W = bounds.width
+        var pts: [CGPoint] = []
+        var row = segs[0].row
+        var i = 0
+        var xx: CGFloat = 0
+        while xx <= W {
+            let t = t0 + Double(xx / W) * (t1 - t0)
+            while i < segs.count, segs[i].s <= t { row = segs[i].row; i += 1 }
+            let y = Self.rowH * CGFloat(row) + Self.rowH / 2 + 4
+            if let last = pts.last, last.y != y { pts.append(CGPoint(x: xx, y: last.y)) }
+            pts.append(CGPoint(x: xx, y: y))
+            xx += step
+        }
+        return pts
+    }
+
     override func draw(_ rect: CGRect) {
         guard let ctx = UIGraphicsGetCurrentContext(), !segs.isEmpty else { return }
         let W = bounds.width
@@ -637,7 +656,9 @@ final class HVCard: HomeCard {
     var enterPending = false
     private var enterLive = false
     private var hasData = false
-    func render(latest: [String: Any], days rawDays: [[String: Any]], whenTxt: String) {
+    /// soft = 入场扫完后补上攒着的新数:大字和下面四个数滚过去,图换了就重新扫一遍,不硬跳
+    func render(latest: [String: Any], days rawDays: [[String: Any]], whenTxt: String, soft: Bool = false) {
+        if entering { heldRender = (latest, rawDays, whenTxt); return }
         let obj: [String: Any] = ["l": latest, "d": rawDays]
         if JSONSerialization.isValidJSONObject(obj),
            let data = try? JSONSerialization.data(withJSONObject: obj, options: [.sortedKeys]) {
@@ -654,8 +675,10 @@ final class HVCard: HomeCard {
         } else {
             selIdx = max(0, days.count - 1)
         }
-        showDay(days.isEmpty ? nil : days[selIdx], user: false, dir: 0)
-        renderStats(latest)
+        let chartBefore = chart
+        showDay(days.isEmpty ? nil : days[selIdx], user: soft, dir: 0)
+        if soft, let c = chart, c !== chartBefore, !UIAccessibility.isReduceMotionEnabled { sweep(c, delay: 0) }
+        renderStats(latest, soft: soft)
         if !days.isEmpty || !latest.isEmpty { hasData = true }
         if enterPending, enterLive, hasData { playEntrance(delay: 0) }
     }
@@ -678,18 +701,96 @@ final class HVCard: HomeCard {
             HomeReveal.rise(v, stagger: 0.11, delay: delay, steps: n)
         }
         if !chartBox.isHidden, let chart, chartBox.bounds.width > 0 {
-            // 分期图从左往右画出来
-            let mask = UIView(frame: CGRect(x: 0, y: 0, width: 0, height: HVSleepChart.height))
-            mask.backgroundColor = .black
-            chart.mask = mask
-            let a = UIViewPropertyAnimator(duration: 0.9, controlPoint1: homeEnterA, controlPoint2: homeEnterB) {
-                mask.frame = CGRect(x: 0, y: 0, width: self.chartBox.bounds.width, height: HVSleepChart.height)
+            sweep(chart, delay: delay)
+        }
+        // 扫的这段时间里服务器新数到了先攒着,扫完再平滑换上(她 #88696:进来那一下别跳)
+        entering = true
+        let gen = enterGen + 1
+        enterGen = gen
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay + Self.sweepDur + 0.1) { [weak self] in
+            guard let s = self, s.enterGen == gen else { return }
+            s.entering = false
+            if let p = s.heldRender {
+                s.heldRender = nil
+                s.render(latest: p.0, days: p.1, whenTxt: p.2, soft: true)
             }
-            a.addCompletion { [weak chart] _ in
-                guard let chart, chart.mask === mask else { return }
-                chart.mask = nil
-            }
-            a.startAnimation(afterDelay: delay)
+        }
+    }
+
+    static let sweepDur: Double = 1.6
+    private var entering = false
+    private var enterGen = 0
+    private var heldRender: ([String: Any], [[String: Any]], String)?
+    private var sweepDot: CALayer?
+
+    /// 分期图像心电图那样扫出来:亮点沿睡眠线匀速从左走到右,线在它身后长出来(前沿柔边),走到头亮点淡掉
+    private func sweep(_ chart: HVSleepChart, delay: Double) {
+        chart.layoutIfNeeded()
+        let W = chart.bounds.width, H = HVSleepChart.height
+        guard W > 0 else { return }
+        let feather: CGFloat = 14
+        let mask = CAGradientLayer()
+        mask.startPoint = CGPoint(x: 0, y: 0.5)
+        mask.endPoint = CGPoint(x: 1, y: 0.5)
+        mask.colors = [UIColor.black.cgColor, UIColor.black.cgColor, UIColor.clear.cgColor]
+        let solid = NSNumber(value: Double(W / (W + feather)))
+        mask.locations = [0, solid, 1]
+        mask.anchorPoint = .zero
+        mask.frame = CGRect(x: 0, y: 0, width: W + feather, height: H)
+        mask.position = CGPoint(x: -W, y: 0)
+        chart.layer.mask = mask
+        let ease = CAMediaTimingFunction(controlPoints: 0.42, 0.0, 0.58, 1.0)
+        let begin = CACurrentMediaTime() + delay
+        let move = CABasicAnimation(keyPath: "position.x")
+        move.fromValue = -W
+        move.toValue = 0
+        move.duration = Self.sweepDur
+        move.beginTime = begin
+        move.timingFunction = ease
+        move.fillMode = .both
+        move.isRemovedOnCompletion = false
+        mask.add(move, forKey: "sweep")
+
+        sweepDot?.removeFromSuperlayer()
+        sweepDot = nil
+        let pts = chart.tracePoints()
+        if pts.count > 1 {
+            let dot = CALayer()
+            dot.bounds = CGRect(x: 0, y: 0, width: 7, height: 7)
+            dot.cornerRadius = 3.5
+            dot.backgroundColor = theme.text.withAlphaComponent(0.95).cgColor
+            dot.shadowColor = theme.text.cgColor
+            dot.shadowOpacity = 0.85
+            dot.shadowRadius = 5
+            dot.shadowOffset = .zero
+            dot.position = pts[0]
+            dot.opacity = 0
+            chart.layer.superlayer?.addSublayer(dot)
+            sweepDot = dot
+            let path = CAKeyframeAnimation(keyPath: "position")
+            path.values = pts.map { NSValue(cgPoint: $0) }
+            path.keyTimes = pts.map { NSNumber(value: Double($0.x / W)) }
+            path.calculationMode = .linear
+            path.duration = Self.sweepDur
+            path.timingFunction = ease
+            let fade = CAKeyframeAnimation(keyPath: "opacity")
+            fade.values = [0, 1, 1, 0]
+            fade.keyTimes = [0, 0.06, 0.86, 1]
+            fade.duration = Self.sweepDur
+            let g = CAAnimationGroup()
+            g.animations = [path, fade]
+            g.duration = Self.sweepDur
+            g.beginTime = begin
+            g.fillMode = .both
+            g.isRemovedOnCompletion = false
+            dot.add(g, forKey: "trace")
+        }
+        let dotNow = sweepDot
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay + Self.sweepDur + 0.05) { [weak self, weak chart] in
+            if let chart, chart.layer.mask === mask { chart.layer.mask = nil }
+            guard let dotNow else { return }
+            dotNow.removeFromSuperlayer()
+            if self?.sweepDot === dotNow { self?.sweepDot = nil }
         }
     }
 
@@ -796,6 +897,8 @@ final class HVCard: HomeCard {
         let old = chart
         chart = next
         chartDate = date
+        sweepDot?.removeFromSuperlayer()
+        sweepDot = nil
         guard let old, dir != 0, W > 0, !UIAccessibility.isReduceMotionEnabled else {
             old?.removeFromSuperview()
             chartBox.addSubview(next)
@@ -824,6 +927,14 @@ final class HVCard: HomeCard {
         showDay(days[selIdx], user: true, dir: g.direction == .right ? -1 : 1)
     }
 
+    /// 预览路线用:把入场(大字/四个数升起 + 分期图扫出)再放一遍
+    func previewEnter() {
+        enterLive = true
+        hasData = true
+        enterPending = true
+        playEntrance(delay: 0.3)
+    }
+
     /// 预览路线用:模拟往右滑一下(看前一天);older=false 是往左滑回后一天
     func previewSwipeOlder(_ older: Bool = true) {
         let to = older ? selIdx - 1 : selIdx + 1
@@ -832,7 +943,7 @@ final class HVCard: HomeCard {
         showDay(days[selIdx], user: true, dir: older ? -1 : 1)
     }
 
-    private func renderStats(_ latest: [String: Any]) {
+    private func renderStats(_ latest: [String: Any], soft: Bool = false) {
         stats.arrangedSubviews.forEach { $0.removeFromSuperview() }
         let prev: [String: Any]? = days.count >= 2 ? days[days.count - 2] : nil
         func delta(_ k: String) -> Double {
@@ -856,12 +967,12 @@ final class HVCard: HomeCard {
         ]
         for (i, it) in items.enumerated() {
             stats.addArrangedSubview(makeStat(key: "hv\(i)", txt: it.0, val: it.1, unit: it.2,
-                                              label: it.3, delta: it.4, grouped: it.5))
+                                              label: it.3, delta: it.4, grouped: it.5, soft: soft))
         }
     }
 
     private func makeStat(key: String, txt: String, val: Double?, unit: String,
-                          label: String, delta: Double, grouped: Bool) -> UIView {
+                          label: String, delta: Double, grouped: Bool, soft: Bool = false) -> UIView {
         let v = UILabel()
         v.textAlignment = .center
         let l = UILabel()
@@ -886,9 +997,11 @@ final class HVCard: HomeCard {
         if let val {
             let fmt = NumberFormatter()
             if grouped { fmt.numberStyle = .decimal }
-            roller.set(key: key, to: val) { x in
+            let show: (Double) -> Void = { x in
                 paint(grouped ? (fmt.string(from: NSNumber(value: Int(x.rounded()))) ?? "") : String(Int(x.rounded())))
             }
+            if soft { roller.roll(key: key, to: val, dur: 0.8, apply: show) }
+            else { roller.set(key: key, to: val, apply: show) }
         } else { paint("—") }
         let col = UIStackView(arrangedSubviews: [v, l])
         col.axis = .vertical
@@ -2104,7 +2217,10 @@ final class HomeView: UIView {
             name: UIResponder.keyboardWillHideNotification, object: nil)
     }
     required init?(coder: NSCoder) { fatalError() }
-    deinit { NotificationCenter.default.removeObserver(self) }
+    deinit {
+        NotificationCenter.default.removeObserver(self)
+        if let o = pushObs { NotificationCenter.default.removeObserver(o) }
+    }
 
     @objc private func kbShow(_ n: Notification) {
         guard let f = (n.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? NSValue)?.cgRectValue else { return }
@@ -2157,7 +2273,7 @@ final class HomeView: UIView {
         memCard.render(title: (d?["title"] as? String) ?? "",
                        text: (d?["text"] as? String) ?? "今天还没抽到,晚点再来。")
     }
-    private func applyVitals(_ d: [String: Any]?, daily dd: [String: Any]?, tm td: [String: Any]?) {
+    private func applyVitals(_ d: [String: Any]?, daily dd: [String: Any]?, tm td: [String: Any]?, soft: Bool = false) {
         let latest = ((d?["health"] as? [String: Any])?["data"] as? [String: Any]) ?? [:]
         var whenTxt = ""
         if let up = d?["updated_at"] as? String {
@@ -2185,7 +2301,7 @@ final class HomeView: UIView {
         }
         let days = (dd?["days"] as? [[String: Any]]) ?? []
         vitals.revealContent()
-        vitals.render(latest: latest, days: days, whenTxt: whenTxt)
+        vitals.render(latest: latest, days: days, whenTxt: whenTxt, soft: soft)
         let tdays = Set((td?["days"] as? [String]) ?? [])
         calCard.setData(days: tdays, mens: mens)
     }
@@ -2202,6 +2318,11 @@ final class HomeView: UIView {
             Self.cacheSave("obmem", d)
             self?.gated { self?.applyObmem(d) }
         }
+        loadVitals()
+        todoCard.load()
+    }
+
+    private func loadVitals(soft: Bool = false) {
         HomeNet.get("/app/vitals") { [weak self] d in
             guard let s = self else { return }
             Self.cacheSave("vitals", d)
@@ -2209,11 +2330,20 @@ final class HomeView: UIView {
                 Self.cacheSave("daily", dd)
                 HomeNet.get("/app/tm_days?session_id=yan-main") { td in
                     Self.cacheSave("tmdays", td)
-                    s.gated { s.applyVitals(d, daily: dd, tm: td) }
+                    s.gated { s.applyVitals(d, daily: dd, tm: td, soft: soft) }
                 }
             }
         }
-        todoCard.load()
+    }
+
+    /// 1023 她 #88696:手机刚把健康数据传上去(开 App 那次,或手表把睡眠同步过来那次),首页立刻再取一遍,不用退出重进
+    static let vitalsPushed = Notification.Name("lx.vitals.pushed")
+    private var pushObs: NSObjectProtocol?
+    func watchVitalsPush() {
+        guard pushObs == nil else { return }
+        pushObs = NotificationCenter.default.addObserver(forName: Self.vitalsPushed, object: nil, queue: .main) { [weak self] _ in
+            self?.loadVitals(soft: true)
+        }
     }
 
     private var renderGateOpen = false
@@ -2337,6 +2467,7 @@ public class HomePlugin: CAPPlugin, CAPBridgedPlugin, UIGestureRecognizerDelegat
             }
         }
         if enter { v.prepareEnter() }
+        v.watchVitalsPush()
         v.renderCached()
         v.loadAll()
         if deferLoad {
@@ -3262,17 +3393,32 @@ enum LXSleepPreview {
         win.addSubview(page)
         page.layoutIfNeeded()
         card.render(latest: latest, days: days, whenTxt: "sample")
-        // 第一步一开页就亮着,往后 30 秒起每 12 秒一步:前一天 / 再前一天 / 回后一天
-        let steps: [(UIColor, () -> Void)] = [
-            (.yellow, { }),
-            (.cyan, { card.previewSwipeOlder() }),
-            (.red, { card.previewSwipeOlder() }),
-            (.orange, { card.previewSwipeOlder(false) }),
+        // 1023 入场扫图(录屏看):8 秒黄=扫一遍;14 秒绿=扫的半路来了新数(新的一夜+四个数变了),扫完再滚过去、新图再扫;
+        // 22 秒蓝=再扫一遍。30 秒起每 12 秒一步:前一天 / 再前一天 / 回后一天
+        let d4: [[String: Any]] = [
+            seg("core", 4, 0.5, 1.2), seg("deep", 4, 1.2, 2.1), seg("core", 4, 2.1, 3.0), seg("rem", 4, 3.0, 3.6),
+            seg("awake", 4, 3.6, 3.66), seg("core", 4, 3.66, 4.8), seg("deep", 4, 4.8, 5.2), seg("rem", 4, 5.2, 6.1),
+            seg("core", 4, 6.1, 7.0), seg("awake", 4, 7.0, 7.05), seg("rem", 4, 7.05, 7.5)]
+        let days2 = days + [day("2026-10-22", d4)]
+        let latest2: [String: Any] = ["stepsToday": 5876, "activeKcalToday": 265, "restingHeartRate": 59, "hrvSDNN": 47]
+        let steps: [(Double, UIColor, () -> Void)] = [
+            (0, .white, { }),
+            (8, .yellow, { card.previewEnter() }),
+            (14, .green, {
+                card.previewEnter()
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
+                    card.render(latest: latest2, days: days2, whenTxt: "sample")
+                }
+            }),
+            (22, .blue, { card.previewEnter() }),
+            (30, .cyan, { card.previewSwipeOlder() }),
+            (42, .red, { card.previewSwipeOlder() }),
+            (54, .orange, { card.previewSwipeOlder(false) }),
         ]
-        for (i, st) in steps.enumerated() {
-            DispatchQueue.main.asyncAfter(deadline: .now() + (i == 0 ? 0 : 30 + Double(i - 1) * 12)) {
-                phase.backgroundColor = st.0
-                st.1()
+        for st in steps {
+            DispatchQueue.main.asyncAfter(deadline: .now() + st.0) {
+                phase.backgroundColor = st.1
+                st.2()
             }
         }
     }

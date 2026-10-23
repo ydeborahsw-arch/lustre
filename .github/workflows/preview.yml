@@ -110,10 +110,17 @@ jobs:
             while [ $SECONDS -lt $end ]; do shot r$i; i=$((i + 1)); sleep 2; done
           elif [ "$LX_PREVIEW_FOCUS" = "sleep" ]; then
             # One Vitals card with sample sleep stages covers the window (chat hidden, no server data).
-            # Four steps: latest day from the start, then one day back at about 30 s, another at 42 s, forward again at 54 s.
+            # The entrance sweep plays at about 8 s, 14 s (new data arrives halfway) and 22 s; a screen recording covers 0-30 s.
+            # Then one day back at about 30 s, another at 42 s, forward again at 54 s.
+            xcrun simctl io "$UDID" recordVideo --codec=h264 --force "$PWD/shots/zvid.mp4" >/dev/null 2>&1 &
+            RV=$!
+            t0=$SECONDS
             sleep 5
             end=$((SECONDS + 80)); i=0
-            while [ $SECONDS -lt $end ]; do shot z$i; i=$((i + 1)); sleep 2; done
+            while [ $SECONDS -lt $end ]; do
+              shot z$i; i=$((i + 1)); sleep 2
+              if [ -n "$RV" ] && [ $((SECONDS - t0)) -ge 32 ]; then kill -INT $RV 2>/dev/null || true; wait $RV 2>/dev/null || true; RV=""; fi
+            done
           elif [ "$LX_PREVIEW_FOCUS" = "sys" ]; then
             sleep 5
             end=$((SECONDS + 110)); i=0

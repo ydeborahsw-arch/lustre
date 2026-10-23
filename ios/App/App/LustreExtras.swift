@@ -773,7 +773,7 @@ final class HealthWatch {
     private let lock = NSLock()
     private var lastUp = Date.distantPast
 
-    private var pending: [HKQuantityType] = []
+    private var pending: [HKSampleType] = []
 
     static let logKey = "lustre.hw.log"
     static func note(_ ev: String, _ detail: String = "") {
@@ -803,6 +803,7 @@ final class HealthWatch {
     }
     private static func shortId(_ id: String) -> String {
         id.replacingOccurrences(of: "HKQuantityTypeIdentifier", with: "")
+            .replacingOccurrences(of: "HKCategoryTypeIdentifier", with: "")
     }
 
     private let ids = ["HKQuantityTypeIdentifierHeartRate", "HKQuantityTypeIdentifierStepCount",
@@ -823,9 +824,21 @@ final class HealthWatch {
             store.execute(q)
             enable(qt, id: id)
         }
+        // 1023 她 #88696:手表把夜里的睡眠同步进手机那一刻就传,不等她开 App。
+        // 跟心率同一批同步进来时,心率那次可能先传走了(睡眠还没落库),所以睡眠不受 90 秒节流,等 3 秒再取
+        if let sl = HKObjectType.categoryType(forIdentifier: .sleepAnalysis) {
+            let q = HKObserverQuery(sampleType: sl, predicate: nil) { _, done, err in
+                Self.note("fire", "Sleep \(Self.envTag()) \(err.map { "err=\($0.localizedDescription)" } ?? "")")
+                DispatchQueue.global().asyncAfter(deadline: .now() + 3) {
+                    BackgroundSync.shared.pushHealth { done() }
+                }
+            }
+            store.execute(q)
+            enable(sl, id: sl.identifier)
+        }
     }
 
-    private func enable(_ qt: HKQuantityType, id: String) {
+    private func enable(_ qt: HKSampleType, id: String) {
         BackgroundSync.shared.store.enableBackgroundDelivery(for: qt, frequency: .immediate) { [weak self] ok, err in
             Self.note(ok ? "enable+" : "enable-", "\(Self.shortId(id)) \(err?.localizedDescription ?? "")")
             guard !ok, let s = self else { return }
@@ -978,6 +991,7 @@ final class BackgroundSync {
                     let keep = (UserDefaults.standard.stringArray(forKey: HealthWatch.logKey) ?? []).suffix(5)
                     UserDefaults.standard.set(Array(keep), forKey: HealthWatch.logKey)
                     HealthWatch.shared.retryPending()
+                    DispatchQueue.main.async { NotificationCenter.default.post(name: HomeView.vitalsPushed, object: nil) }
                 }
                 done()
             }.resume()

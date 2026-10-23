@@ -383,7 +383,11 @@ final class LXVitalsLoop {
             guard let s = self else { return }
             s.running = false
             guard !out.isEmpty, JSONSerialization.isValidJSONObject(out), let r = s.req("/app/vitals", "POST", out) else { return }
-            URLSession.shared.dataTask(with: r).resume()
+            URLSession.shared.dataTask(with: r) { _, resp, _ in
+                guard (resp as? HTTPURLResponse)?.statusCode == 200 else { return }
+                // 1023:传完让首页再取一遍(开 App 时首页先取的是传之前的旧数)
+                DispatchQueue.main.async { NotificationCenter.default.post(name: HomeView.vitalsPushed, object: nil) }
+            }.resume()
         }
     }
 }
