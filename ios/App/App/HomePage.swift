@@ -92,15 +92,32 @@ struct HomeTheme {
 
 
 enum HomeNet {
+    /// 1024 她 #89284:早上刚解锁那一分钟手机网还没通,08:38 发的请求一个都没到服务器,
+    /// 以前失败就算了、首页一直停在旧数直到她退出重进。现在连不上就隔 2/4/8/16 秒再试。
+    static let retryDelays: [Double] = [2, 4, 8, 16]
+    static func send(_ r: URLRequest, attempt: Int = 0,
+                     done: @escaping (Data?, HTTPURLResponse?) -> Void) {
+        URLSession.shared.dataTask(with: r) { data, resp, err in
+            let http = resp as? HTTPURLResponse
+            if http == nil, err != nil, attempt < retryDelays.count {
+                DispatchQueue.global().asyncAfter(deadline: .now() + retryDelays[attempt]) {
+                    send(r, attempt: attempt + 1, done: done)
+                }
+                return
+            }
+            done(data, http)
+        }.resume()
+    }
+
     static func get(_ path: String, timeout: Double = 20, done: @escaping ([String: Any]?) -> Void) {
         guard !LustreConfig.secret.isEmpty,
               let url = URL(string: LustreConfig.apiBase + path) else { done(nil); return }
         var r = URLRequest(url: url, timeoutInterval: timeout)
         r.setValue("Bearer " + LustreConfig.secret, forHTTPHeaderField: "Authorization")
-        URLSession.shared.dataTask(with: r) { data, _, _ in
+        send(r) { data, _ in
             let obj = data.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
             DispatchQueue.main.async { done(obj) }
-        }.resume()
+        }
     }
     static func post(_ path: String, _ body: [String: Any]) {
         guard !LustreConfig.secret.isEmpty,

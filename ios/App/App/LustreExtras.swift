@@ -986,15 +986,16 @@ final class BackgroundSync {
             let log = UserDefaults.standard.stringArray(forKey: HealthWatch.logKey) ?? []
             guard let body = try? JSONSerialization.data(withJSONObject: ["health": snap, "hwlog": log]),
                   let req = self.request("/app/vitals", method: "POST", body: body) else { done(); return }
-            URLSession.shared.dataTask(with: req) { _, resp, _ in
-                if (resp as? HTTPURLResponse)?.statusCode == 200 {
+            HomeNet.send(req) { _, resp in
+                if resp == nil { HealthWatch.note("push", "连不上服务器") }
+                if resp?.statusCode == 200 {
                     let keep = (UserDefaults.standard.stringArray(forKey: HealthWatch.logKey) ?? []).suffix(5)
                     UserDefaults.standard.set(Array(keep), forKey: HealthWatch.logKey)
                     HealthWatch.shared.retryPending()
                     DispatchQueue.main.async { NotificationCenter.default.post(name: HomeView.vitalsPushed, object: nil) }
                 }
                 done()
-            }.resume()
+            }
         }
     }
 }
